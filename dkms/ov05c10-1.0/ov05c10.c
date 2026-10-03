@@ -52,7 +52,7 @@ extern int __weak cvs_send_mipi_rgb_config(void);
 #define MAX_ANA_GAIN			0xf8  // 15.5x
 #define MIN_ANA_GAIN			0x10  // 1x
 #define OV05C10_ANAL_GAIN_STEP		0x01
-#define OV05C10_ANAL_GAIN_DEFAULT	0x10
+#define OV05C10_ANAL_GAIN_DEFAULT	0x40
 
 #define MAX_DIG_GAIN			0x100 // 4x
 #define MIN_DIG_GAIN			0x40  // 1x
