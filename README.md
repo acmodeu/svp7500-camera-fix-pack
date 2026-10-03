@@ -53,6 +53,25 @@ refuse to run anyway.
 
 ---
 
+## Key Changes & Enhancements in this Fork
+
+This fork incorporates crucial reverse-engineering fixes, Lunar Lake (LNL) hardware support, and zero-overhead legacy application integration:
+
+- 🔒 **Hardware Privacy LED Latch Fix (Protocol 1.0 / Lunar Lake)**:
+  Unconditionally dispatches `SET_HOST_IDENTIFIER` with `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1` across all protocol versions. Prevents the white camera LED from latching permanently ON during modern standby (`s2idle`) or after camera sessions.
+- 📡 **RGB MIPI Routing & Stream Recovery**:
+  Implements `cvs_send_mipi_rgb_config()` for `ov05c10` sensor activation and automatically restores port 0 RGB routing in `hm1092_set_stream(0)` after IR face unlock sessions.
+- 💡 **Low-Light Sensor Calibration (`ov05c10`)**:
+  Calibrated default analog gain to 4x (`0x40`), eliminating severe underexposure in indoor lighting without introducing digital noise.
+- ⚡ **On-Demand V4L2 Loopback & Bubblewrap Isolation (QRCA, WebRTC)**:
+  Eliminates the 30–40% idle CPU burn of 24/7 background loopback services by activating the GStreamer feeder **only** while apps are open. Masks raw IPU7 ISYS endpoints (`/dev/video0..31`) via `bwrap` to prevent WebRTC/Qt crashes on raw Bayer nodes.
+- 🛠️ **Installer & Uninstaller Improvements**:
+  Full uninstallation support (`sudo ./install.sh --uninstall --go` or `./uninstall.sh --go`) with clean removal of all DKMS modules, configs, and wrappers. Preserves interactive TTY output during initramfs rebuilds to prevent hangs on interactive prompts (e.g., Limine bootloader hooks).
+
+*(See the [technical deep dive](#lunar-lake-lnl-rgb-support-privacy-led-fix--on-demand-v4l2-loopback) below for full reverse-engineering details).*
+
+---
+
 ## Step 0 — check your hardware FIRST (5 seconds)
 
 ```bash
@@ -825,7 +844,7 @@ Issue tracker: [intel/vision-drivers#37](https://github.com/intel/vision-drivers
 
 ## What's in here
 
-6 components, each fixing a different piece of the broken stack.
+7 components, each fixing a different piece of the broken stack.
 
 ### 1. `intel-cvs` DKMS (the headline fix)
 - Patches `cvs_init()` to remove a buggy `IRQF_ONESHOT` flag from `devm_request_irq()`. The flag was meaningless on a non-threaded handler and caused a kernel WARNING. **More importantly: it made IRQ delivery from the SVP7500 unreliable, which is why the bridge wedges itself after brief idle periods.**
@@ -871,6 +890,10 @@ Issue tracker: [intel/vision-drivers#37](https://github.com/intel/vision-drivers
 ### 6. udev rules
 - Disables USB autosuspend on the SVP7500. Bridge firmware has trouble with power state transitions; keeping it always-on prevents some failure modes.
 - Grants the `video` group write access to the IR illuminator's brightness, so Howdy can fire it as an unprivileged user from a lock screen.
+
+### 7. On-demand V4L2 loopback & desktop isolation (QRCA, WebRTC)
+- `modprobe.d/v4l2loopback.conf` (`exclusive_caps=1`, card label `"Integrated Camera"`, `/dev/video50`).
+- On-demand feeder and Bubblewrap isolation wrapper (`scripts/qrca`, installed to `/usr/local/bin/qrca`) preventing 30–40% idle CPU burn and hiding raw IPU7 ISYS endpoints (`/dev/video0..31`) from crashing legacy V4L2 applications.
 
 ## Why this needed reverse engineering at all
 
@@ -983,6 +1006,7 @@ The DKMS modules contain code from Intel (`intel-cvs`, `ipu-bridge`), Himax (sen
 
 ## Credits
 
+- @acmodeu & Antigravity (Gemini 3.8 Flash) — adaptation of the original patch for Lunar Lake hardware (Dell Pro 14 PB14250)
 - @jibsta210 — patch development, reverse engineering, testing
 - @tverhaeghe — USBPcap traces from Windows on matching hardware (the key dataset)
 - @acmodeu, @Aohzan, @dalandro — testing on hardware the author does not own; between them they surfaced the CSI-2 port, bridge ACPI id and sensor differences that the tooling now discovers instead of assuming

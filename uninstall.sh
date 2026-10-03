@@ -153,7 +153,11 @@ if [[ -z $IC ]]; then
 elif [[ $GO -eq 1 ]]; then
   # Without this the initramfs keeps loading the modules you just removed, and
   # the uninstall looks like it did nothing.
-  $IC >/dev/null 2>&1 && done_ "initramfs regenerated ($IC)" || warn "$IC failed — run it by hand"
+  if $IC; then
+    done_ "initramfs regenerated ($IC)"
+  else
+    warn "$IC failed — run it by hand"
+  fi
 else
   plando "regenerate the initramfs ($IC)"
 fi
