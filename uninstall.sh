@@ -67,7 +67,7 @@ for m in "${OURS[@]}"; do
   for v in "${VERS[@]}"; do
     if [[ $GO -eq 1 ]]; then
       dkms remove -m "$m" -v "$v" --all >/dev/null 2>&1
-      rm -rf "/usr/src/${m}-${v}"
+      rm -rf "/usr/src/${m}-${v}" "/usr/src/.${m}-${v}.bak"
       did "$m/$v"
     else
       plan "$m/$v  (dkms remove --all, plus /usr/src/${m}-${v})"

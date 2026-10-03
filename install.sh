@@ -704,7 +704,8 @@ install_module(){
     return 0
   fi
   dst="/usr/src/${m}-${ver}"
-  bak="${dst}.bak"
+  # Hidden directory so DKMS globs (/usr/src/*) never parse it as a module version
+  bak="/usr/src/.${m}-${ver}.bak"
 
   # A DIFFERENT version of the same module already registered with DKMS is not
   # something to install over: dkms usually refuses, and when it does not you
