@@ -80,6 +80,8 @@ Usage: sudo ./install.sh [--kernel-only|--howdy-only] [--dry-run]
                     install whose modules the kernel will refuse at boot is a
                     FAILURE, because nothing about it is in effect.
                     --i-have-enrolled-my-mok is accepted as a synonym.
+  --uninstall       Uninstall all installed components by delegating to
+                    ./uninstall.sh. Pass '--go' to execute removal.
   -h, --help        This text.
 
 Exit status: 0 success — everything selected actually happened,
@@ -95,6 +97,13 @@ EOF
 
 for a in "$@"; do
   case "$a" in
+    --uninstall)
+      args=()
+      for arg in "$@"; do
+        [[ "$arg" != "--uninstall" ]] && args+=("$arg")
+      done
+      exec "$HERE/uninstall.sh" "${args[@]}"
+      ;;
     --kernel-only) DO_HOWDY=0; SEEN_KERNEL_ONLY=1 ;;
     --howdy-only)  DO_KERNEL=0; SEEN_HOWDY_ONLY=1 ;;
     --dry-run)     DRY_RUN=1 ;;

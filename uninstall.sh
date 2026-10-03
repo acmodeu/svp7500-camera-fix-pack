@@ -75,13 +75,24 @@ for m in "${OURS[@]}"; do
   done
 done
 
-step "udev rules"
-for r in 99-hm1092-ir-led.rules 99-svp7500-no-autosuspend.rules; do
-  f=/etc/udev/rules.d/$r
+step "udev rules and modprobe.d configs"
+for f in /etc/udev/rules.d/99-hm1092-ir-led.rules /etc/udev/rules.d/99-svp7500-no-autosuspend.rules \
+         /etc/modprobe.d/99-ipu7-usbio-order.conf /etc/modprobe.d/v4l2loopback.conf; do
   if [[ -f $f ]]; then
     if [[ $GO -eq 1 ]]; then rm -f "$f"; did "$f"; else plan "$f"; fi
   else skip "$f"; fi
 done
+
+step "desktop integration and on-demand wrappers"
+for f in /usr/local/bin/qrca /usr/local/share/applications/org.kde.qrca.desktop \
+         /usr/local/share/applications/org.kde.qrca.wifi.desktop; do
+  if [[ -f $f ]]; then
+    if [[ $GO -eq 1 ]]; then rm -f "$f"; did "$f"; else plan "$f"; fi
+  else skip "$f"; fi
+done
+if [[ $GO -eq 1 ]] && command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/local/share/applications 2>/dev/null || true
+fi
 
 step "wireplumber drop-ins"
 WPD=/usr/share/wireplumber/wireplumber.conf.d
