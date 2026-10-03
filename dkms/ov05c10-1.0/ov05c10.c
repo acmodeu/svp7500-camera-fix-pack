@@ -22,6 +22,14 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 
+/*
+ * Exported by intel_cvs. Fires HOST_SET_MIPI_CONFIG (0x0830) with the verbatim
+ * Windows-trace RGB payload, configuring the SVP7500 bridge for port-0 (RGB)
+ * forwarding. Called from ov05c10_start_streaming() AFTER the sensor is placed
+ * in streaming mode so the bridge sees active MIPI clock on port 0.
+ */
+extern int __weak cvs_send_mipi_rgb_config(void);
+
 #define OV05C10_REG_CHIP_ID_H	CCI_REG16(0x00)	//P0:0x00[7:0],0x01[7:0]
 #define OV05C10_REG_CHIP_ID_L	CCI_REG16(0x02)	//P0:0x02[7:0],0x03[7:0]
 #define OV05C10_CHIP_ID		0x43055610
@@ -681,6 +689,11 @@ static int ov05c10_start_streaming(struct ov05c10 *ov05c10)
 	if (ret) {
 		dev_err(&client->dev, "failed to start stream");
 		goto err_rpm_put;
+	}
+
+	if (cvs_send_mipi_rgb_config) {
+		int cvs_ret = cvs_send_mipi_rgb_config();
+		dev_info(&client->dev, "intel_cvs port-0 RGB mipi config returned %d\n", cvs_ret);
 	}
 
 	return 0;

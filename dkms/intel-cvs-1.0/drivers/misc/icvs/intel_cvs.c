@@ -158,6 +158,31 @@ int cvs_send_mipi_ir_config(void)
 }
 EXPORT_SYMBOL_GPL(cvs_send_mipi_ir_config);
 
+int cvs_send_mipi_rgb_config(void)
+{
+	int ret;
+	u8 state = 0xff;
+
+	if (!cvs || !cvs->dev) {
+		pr_err("intel_cvs: cvs_send_mipi_rgb_config: not initialized\n");
+		return -ENODEV;
+	}
+	/* len=0 sentinel selects the RGB (port 0) verbatim payload in cvs_write_i2c */
+	ret = cvs_write_i2c(HOST_SET_MIPI_CONFIG, NULL, 0);
+
+	if (cvs_read_i2c(GET_DEVICE_STATE, (char *)&state, sizeof(state)) > 0)
+		dev_info(cvs->dev,
+			 "%s: post-0x830 GET_DEVICE_STATE = 0x%02x\n",
+			 __func__, state);
+	else
+		dev_warn(cvs->dev,
+			 "%s: post-0x830 GET_DEVICE_STATE read failed\n",
+			 __func__);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cvs_send_mipi_rgb_config);
+
 #ifdef DEBUG_CVS
 static int cvs_replay_rgb_hello_init(void)
 {
@@ -370,21 +395,21 @@ static int cvs_common_probe(struct device *dev, bool is_i2c)
 				ret = cvs_get_device_cap(&icvs->cv_fw_capability);
 				if (ret)
 					goto exit;
+			}
 
-				/*
-				 * 2026-05-13: Wire-format of SET_HOST_IDENTIFIER is
-				 * hardcoded inside cvs_write_i2c() (intel_cvs_update.c)
-				 * — the data/len args are ignored for this opcode.
-				 * That hardcoded payload was missing privacy_led_host=1
-				 * which Miguel Vadillo's upstream driver sends for
-				 * Synaptics SVP7xxx per the quirks table.  Fix is in
-				 * cvs_write_i2c case SET_HOST_IDENTIFIER (flip one bit).
-				 */
-				ret = cvs_write_i2c(SET_HOST_IDENTIFIER, NULL, 0);
-				if (ret) {
-					dev_err(cvs->dev, "%s:set_host_identifier cmd failed", __func__);
-					goto exit;
-				}
+			/*
+			 * Wire-format of SET_HOST_IDENTIFIER is hardcoded inside
+			 * cvs_write_i2c() (intel_cvs_update.c) — the data/len args
+			 * are ignored for this opcode. That hardcoded payload sets
+			 * privacy_led_host=1 and rgbcamera_pwrup_host=1. This is
+			 * needed for SVP7xxx across all protocol versions (including
+			 * Protocol 1.0 on LNL) so the bridge relinquishes autonomous
+			 * privacy LED control to the host.
+			 */
+			ret = cvs_write_i2c(SET_HOST_IDENTIFIER, NULL, 0);
+			if (ret) {
+				dev_err(cvs->dev, "%s:set_host_identifier cmd failed: %d\n", __func__, ret);
+				goto exit;
 			}
 
 			/*

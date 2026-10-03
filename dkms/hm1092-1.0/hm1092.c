@@ -38,6 +38,7 @@
  * able to enable port-2 forwarding from the sensor side.
  */
 extern int __weak cvs_send_mipi_ir_config(void);
+extern int __weak cvs_send_mipi_rgb_config(void);
 
 /*
  * Diagnostic module parameters — runtime-tunable for experiments without
@@ -1132,6 +1133,14 @@ static int hm1092_set_stream(struct v4l2_subdev *sd, int enable)
 		ret = hm1092_write_reg(client, HM1092_REG_MODE_SELECT,
 				       HM1092_MODE_STANDBY);
 		dev_info(&client->dev, "  MODE_SELECT=0x00 (standby) write returned %d\n", ret);
+
+		if (send_bridge_config && cvs_send_mipi_rgb_config) {
+			int cvs_ret = cvs_send_mipi_rgb_config();
+			dev_info(&client->dev,
+				 "  intel_cvs restored port-0 RGB mipi config returned %d\n",
+				 cvs_ret);
+		}
+
 		pm_runtime_put_noidle(&client->dev);
 		dev_info(&client->dev, "hm1092_set_stream(0) EXIT\n");
 	}

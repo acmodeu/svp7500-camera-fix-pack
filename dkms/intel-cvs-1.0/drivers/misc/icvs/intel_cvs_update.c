@@ -75,9 +75,9 @@ int cvs_write_i2c(u16 cmd, u8 *data, u32 len)
 		if (count != sizeof(u16))
 			return -EIO;
 		break;
-	case SET_HOST_IDENTIFIER:
+	case SET_HOST_IDENTIFIER: {
 		u8 *out_buff;
-		union cv_host_identifiers host_identifiers;
+		union cv_host_identifiers host_identifiers = { 0 };
 
 		out_buff = devm_kzalloc(ctx->dev,
 					cv_host_identifier_size + sizeof(cmd), GFP_KERNEL);
@@ -109,12 +109,16 @@ int cvs_write_i2c(u16 cmd, u8 *data, u32 len)
 		count = i2c_master_send(client, (const char *)out_buff,
 					sizeof(cmd) + cv_host_identifier_size);
 
-		if (count != cv_host_identifier_size + sizeof(cmd))
+		if (count != cv_host_identifier_size + sizeof(cmd)) {
+			devm_kfree(ctx->dev, out_buff);
 			return -EIO;
+		}
 		dev_info(cvs->dev,
 			 "%s:set_host_identifier sent host_id=0x%08x (privacy_led_host=1 for svp7xxx)\n",
 			 __func__, host_identifiers.value);
+		devm_kfree(ctx->dev, out_buff);
 		break;
+	}
 	case HOST_SET_MIPI_CONFIG: {
 		/*
 		 * Tri-mode HOST_SET_MIPI_CONFIG payload selection:

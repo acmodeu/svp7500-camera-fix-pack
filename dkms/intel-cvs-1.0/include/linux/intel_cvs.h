@@ -216,6 +216,9 @@ struct intel_cvs {
 	struct ctrl_data_fwupd info_fwupd;
 };
 
+int cvs_send_mipi_ir_config(void);
+int cvs_send_mipi_rgb_config(void);
+
 #ifdef DEBUG_CVS
 int cvs_sysfs_dump(char *buf);
 int cvs_exec_cmd(enum cvs_command command);
