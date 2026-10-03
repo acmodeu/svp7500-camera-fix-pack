@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Qrca
+Name[ru]=Qrca
+GenericName=Barcode Scanner
+GenericName[ru]=Сканер штрихкодов
+Comment=Scan and create QR-Codes
+Comment[ru]=Сканирование и создание QR-кодов
+Version=1.0
+Exec=/usr/local/bin/qrca %U
+Icon=org.kde.qrca
+Type=Application
+Terminal=false
+Categories=Qt;KDE;Utility;
+SingleMainWindow=true

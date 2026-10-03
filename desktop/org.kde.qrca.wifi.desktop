@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Qrca Wi-Fi scanner
+Name[ru]=Qrca — сканер Wi-Fi
+GenericName=Wi-Fi QR Code Scanner
+GenericName[ru]=Сканер QR-кодов Wi-Fi
+Comment=Scan Wi-Fi QR codes
+Comment[ru]=Сканирование QR-кодов Wi-Fi
+Version=1.0
+Exec=/usr/local/bin/qrca --wifi
+Icon=org.kde.qrca
+Type=Application
+Terminal=false
+Categories=Qt;KDE;Utility;
+NoDisplay=true
+SingleMainWindow=true
