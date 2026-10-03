@@ -368,7 +368,7 @@ fi
 # udev payload. Both rules are installed in every mode (see the udev section):
 # the illuminator rule is a kernel/udev concern even though only Howdy needs it.
 for f in "$HERE/udev/99-hm1092-ir-led.rules" "$HERE/udev/99-svp7500-no-autosuspend.rules" \
-         "$HERE/modprobe.d/99-ipu7-usbio-order.conf"; do
+         "$HERE/modprobe.d/99-ipu7-usbio-order.conf" "$HERE/modprobe.d/v4l2loopback.conf"; do
   [[ -f $f ]] || pf_bad "package is missing ${f#"$HERE"/} — this clone/tarball is incomplete, re-download it"
 done
 # Howdy-side payload, checked only when the Howdy phase will run.
@@ -1040,6 +1040,12 @@ else
   fi
 fi
 
+if [[ -f "$HERE/modprobe.d/v4l2loopback.conf" ]]; then
+  if run install -m 0644 "$HERE/modprobe.d/v4l2loopback.conf" /etc/modprobe.d/; then
+    ok "installed /etc/modprobe.d/v4l2loopback.conf (exclusive_caps=1 for loopback camera)"
+  fi
+fi
+
 run mkdir -p /etc/udev/rules.d
 install_rule 99-svp7500-no-autosuspend.rules
 install_rule 99-hm1092-ir-led.rules
@@ -1575,6 +1581,32 @@ else
     warn "restart wireplumber for these to take effect"
     action "as your normal user (not root): systemctl --user restart wireplumber, then check 'wpctl status | grep -A6 Video' lists both cameras as [libcamera]"
   fi
+fi
+
+# ---------------------------------------------------------------------------
+say "V4L2 Loopback & Desktop Integration (On-demand QRCA, device isolation)"
+if command -v qrca >/dev/null 2>&1; then
+  if [[ -f "$HERE/scripts/qrca" ]]; then
+    run mkdir -p /usr/local/bin
+    if run install -m 0755 "$HERE/scripts/qrca" /usr/local/bin/qrca; then
+      ok "installed /usr/local/bin/qrca (on-demand feeder + bwrap IPU7 isolation)"
+    fi
+  fi
+  if [[ -d "$HERE/desktop" ]]; then
+    run mkdir -p /usr/local/share/applications
+    for dt in "$HERE"/desktop/*.desktop; do
+      [[ -f $dt ]] || continue
+      dtn=$(basename "$dt")
+      if run install -m 0644 "$dt" "/usr/local/share/applications/$dtn"; then
+        ok "installed /usr/local/share/applications/$dtn"
+      fi
+    done
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      run_quiet update-desktop-database /usr/local/share/applications 2>/dev/null || true
+    fi
+  fi
+else
+  skip_step "qrca is not installed — skipping QRCA on-demand wrapper integration"
 fi
 
 

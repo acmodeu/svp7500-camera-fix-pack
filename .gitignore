@@ -16,3 +16,7 @@ modules.order
 # Byte-compiled howdy recorder sources (importing ir_reader.py writes these).
 __pycache__/
 *.py[cod]
+
+# IDE artifacts
+.idea/
+

@@ -945,6 +945,38 @@ Gotchas that cost real debugging time:
   the illuminator needs `udev/99-hm1092-ir-led.rules` or it silently never fires
   and every frame is too dark to detect a face.
 
+### Lunar Lake (LNL) RGB Support, Privacy LED Fix & On-Demand V4L2 Loopback
+
+Recent Dell Lunar Lake laptops (such as the Dell Pro 14 PB14250, ACPI bridge ID `INTC10DE:00`) pair the Synaptics SVP7500 bridge with an OmniVision OV05C10 RGB sensor and Himax HM1092 IR sensor using **Bridge Protocol 1.0**.
+
+Several platform-specific challenges were reverse-engineered and resolved in this fork:
+
+#### 1. The Autonomous Privacy LED Latch & `SET_HOST_IDENTIFIER`
+- **Symptom**: On Protocol 1.0 devices, the white privacy LED turned on upon the first camera frame and remained stuck ON continuously—even after closing the camera app, and even across `s2idle` Modern Standby (because Lunar Lake motherboards keep 5V VBUS power active to the internal USB hub during sleep).
+- **Root cause**: The SVP7500 firmware implements an autonomous one-way hardware latch for the privacy LED. In upstream `intel_cvs`, the `SET_HOST_IDENTIFIER` (0x0805) command was guarded inside `if (icvs->magic_num_support)`. Because Protocol 1.0 devices report `magic_num_support = false`, `SET_HOST_IDENTIFIER` was never sent, leaving the bridge in autonomous control mode.
+- **The Fix**: 
+  - `SET_HOST_IDENTIFIER` is now dispatched unconditionally during probe across all protocol versions.
+  - The payload explicitly sets `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1`.
+  - Setting `privacy_led_host = 1` commands the bridge firmware to relinquish autonomous LED control to the host OS. Since the Linux IPU7 driver does not drive the hardware LED, the latch is suppressed and the LED stays off permanently, preventing the persistent glare.
+  - *Hardware requirement*: `rgbcamera_pwrup_host` MUST be kept set to `1`. Omitting or clearing this bit corrupts the SVP7500 MIPI PHY transmitter timing, leading to `Received packet is too long / short` errors and hardware stream timeouts in `intel_ipu7_isys`.
+  - System privacy awareness is cleanly handled by userland indicators (e.g. the KDE Plasma / GNOME camera status icon), which accurately show when `ov05c10` is actively streaming.
+
+#### 2. RGB Stream Activation & Low-Light Tuning (`ov05c10`)
+- **Bridge Port 0 Forwarding**: `intel_cvs` exports `cvs_send_mipi_rgb_config()`, called directly from `ov05c10_start_streaming()` once MIPI clock lanes are live.
+- **IR Stream Teardown Recovery**: In `hm1092_set_stream(0)`, the driver automatically restores port 0 RGB routing so that running IR face unlock does not disrupt subsequent RGB webcam sessions.
+- **Analog Gain Calibration**: The default analog gain (`OV05C10_ANAL_GAIN_DEFAULT`) in `ov05c10.c` was raised from `0x10` (1x) to `0x40` (4x). This resolves severe underexposure under normal indoor room lighting without introducing digital noise.
+
+#### 3. On-Demand V4L2 Loopback & Device Isolation (QRCA, WebRTC)
+Modern browsers (Firefox, Chrome) and native Wayland applications talk directly to PipeWire ("Built-in Front Camera"), incurring **0% background CPU** when idle. However, legacy V4L2 apps and QtMultimedia applications (such as KDE's **Qrca** Wi-Fi QR code scanner) do not support the PipeWire camera portal directly and scan `/dev/video*`.
+
+- **The Problem with 24/7 Loopback**: Running a background service like `camera-loopback.service` around the clock continuously feeds `/dev/video50`, which burns **30–40% CPU** on GStreamer/WirePlumber and keeps the camera sensor awake 24/7.
+- **The Raw IPU7 Node Collision**: When V4L2 applications scan `/dev/video*`, they hit the 32 raw Intel IPU7 ISYS endpoints (`/dev/video0` through `/dev/video31`). These raw endpoints either return incompatible raw Bayer buffers (triggering segmentation faults in WebRTC's `libyuv` / `ARGBToUVRow_AVX2`) or bind to the monochrome IR sensor.
+- **The Solution**:
+  - `v4l2loopback` is configured with `exclusive_caps=1 card_label="Integrated Camera" video_nr=50` in `/etc/modprobe.d/v4l2loopback.conf`.
+  - An on-demand wrapper (`scripts/qrca`, installed to `/usr/local/bin/qrca`) starts the PipeWire-to-loopback GStreamer feeder **only** while the application is active.
+  - The wrapper uses **Bubblewrap (`bwrap`)** device isolation to mask `/dev/video0`..`/dev/video31` with `/dev/null`, exposing solely `/dev/video50` to the application.
+  - Upon window closure, a bash `trap` cleanly kills the GStreamer feeder in under 50ms, returning camera sensor power and idle CPU consumption to **0%**.
+
 ## License
 
 The DKMS modules contain code from Intel (`intel-cvs`, `ipu-bridge`), Himax (sensor reference), and original work on top. License terms inherit from each upstream component — primarily GPL-2.0.
