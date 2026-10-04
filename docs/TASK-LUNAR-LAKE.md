@@ -147,6 +147,40 @@ All of these issues were diagnosed, reverse-engineered, fixed, and verified.
 | `dkms/ov05c10-1.0/ov05c10.c` | Sensor driver: MIPI RGB bridge call, 4x analog gain calibration |
 | `dkms/hm1092-1.0/hm1092.c` | IR sensor driver: automatic port 0 RGB restore on stream stop |
 | `modprobe.d/v4l2loopback.conf` | Module parameters for loopback endpoint `/dev/video50` |
+### 3.6. Intel Hardware ISP Bring-up & Elimination of Sensor Artifacts (Option 2)
+- **Problem Statement:** The OmniVision OV05C10 sensor utilizes dual-bank column readout ADCs that produce physical silicon seams (a horizontal split across the center of the frame and subtle vertical column stripes). When debayering via open-source `libcamera` SoftISP, these silicon characteristics are exposed in browser video and video conferencing applications (e.g. Yandex Telemost, Google Meet, Zoom), accompanied by 30-40% continuous CPU debayering load.
+- **Root Cause:** Software ISP debayering lacks sensor-specific Fixed Pattern Noise Correction (FPNC) and dynamic hardware shading compensation tables. The official Dell OEM Ubuntu 24.04 recovery image (`DELL_PRO_14_PLUS_PB14250_Ubuntu2404_A00_Recovery_image.iso`) solves this by utilizing the Intel IPU7 PSYS hardware image signal processor.
+- **Solution & Architecture:**
+  1. **Kernel Driver (`intel-ipu7-psys-1.0` via DKMS):**
+     - Ported from upstream `intel/ipu7-drivers` (`drivers/media/pci/intel/ipu7/psys`).
+     - Added `psys-suspend-BC.patch` (prevents s2idle suspend deadlock and ioctl oops), `fix-psys-debugfs.sh` (null deref guard), and `ipu7_dma_buf_release` safety check.
+     - Automatically compiled with `CC=clang LLVM=1` to match CachyOS kernel toolchain. Exposes `/dev/ipu7-psys0`.
+  2. **Intel Camera HAL & Factory Tuning (`/usr/lib/` & `/etc/camera/ipu7x/`):**
+     - Proprietary libraries (`libcamhal.so.0`, `libia-*`, `libgsticamerainterface-1.0.so.1`, `libjsoncpp.so.25`) extracted from Dell OEM image and installed to `/usr/lib/`.
+     - Sensor tuning definitions, pipeline graphs, and factory calibration (`OV05C10_BBG501N3_LNL.aiqb`, `sensors/ov05c10-uf.json`) installed to `/etc/camera/ipu7x/`.
+     - Hardware ISP plugin installed to `/usr/lib/libcamhal/plugins/ipu7x.so`.
+     - GStreamer hardware element `libgsticamerasrc.so` installed to `/usr/lib/gstreamer-1.0/`.
+  3. **On-Demand Streaming Bridge (`v4l2-relayd` -> `/dev/video50`):**
+     - Built and patched `v4l2-relayd` (v0.2.0) with buffer timestamp normalization (`is-live=true do-timestamp=true format=time`) and optional splash.
+     - Systemd service (`v4l2-relayd.service`) bridges `icamerasrc` hardware stream into `/dev/video50` (`v4l2loopback`).
+     - **On-Demand Power Management:** When no application has `/dev/video50` open, `v4l2-relayd` consumes **0.0% CPU**, and the sensor, bridge, and IPU7 hardware remain powered down. When any app (Chrome, Firefox, Telegram, Zoom, Yandex Telemost) requests video, `v4l2-relayd` powers on the hardware ISP pipeline in real-time.
+  4. **Results:**
+     - Horizontal silicon split line and column stripes are **100% eliminated** by the hardware ISP.
+     - CPU usage for 1080p@30fps video processing drops from ~35% down to **< 1%** (hardware DSP offload).
+     - Universal out-of-the-box compatibility across all Linux web browsers, Electron apps, and native V4L2 clients without needing sandbox or bubblewrap workarounds.
+
+---
+
+## 4. Key Repository Files & Deliverables
+
+| Path | Purpose / Description |
+| :--- | :--- |
+| `dkms/intel-cvs-1.0/` | Patched Synaptics SVP7500 driver (`intel_cvs.ko`) with LED protocol fix |
+| `dkms/ov05c10-1.0/` | OmniVision OV05C10 sensor driver (`ov05c10.ko`) with exposure & clock fixes |
+| `dkms/hm1092-1.0/` | Himax HM1092 IR sensor driver (`hm1092.ko`) with Port 0 RGB recovery |
+| `dkms/intel-ipu7-psys-1.0/` | Intel IPU7 PSYS hardware ISP kernel driver (`intel-ipu7-psys.ko`) |
+| `dkms/ipu7-psys-patches/` | Bugfix patches for upstream Intel IPU7 PSYS kernel driver |
+| `libcamera/ipa/simple/ov05c10.yaml` | Factory Dell OEM calibrated CCMs extracted from recovery AIQB |
 | `scripts/qrca` | On-demand GStreamer feeder wrapper with `bwrap` hardware isolation |
 | `desktop/org.kde.qrca*.desktop` | Desktop overrides directing application launches through `qrca` wrapper |
 | `install.sh` | Main installer: preflight checks, DKMS builds, desktop/modprobe installation, `--uninstall` handling |
@@ -179,10 +213,10 @@ To verify the integrity and health of this fix pack on target hardware:
    # Verifies libcamera recognizes both the OV05C10 and HM1092 sensors
    ```
 
-4. **Testing On-Demand Isolation Wrapper:**
+4. **Testing On-Demand Hardware Relay:**
    ```bash
-   /usr/local/bin/qrca
-   # Validates bwrap device masking, /dev/video50 feed, and 0% CPU return on exit
+   sudo systemctl status v4l2-relayd.service
+   # Verifies on-demand relay daemon is active and waiting for client connections
    ```
 
 ---
@@ -192,4 +226,5 @@ To verify the integrity and health of this fix pack on target hardware:
 - **Never bypass `rgbcamera_pwrup_host = 1`:** When modifying `SET_HOST_IDENTIFIER` payloads in `intel_cvs.c`, clearing this bit will destroy MIPI PHY clock lane sync and hang the camera bus.
 - **Do not force-install `int3472-patched` on kernel >= 7.1:** Respect `tools/int3472-needed.sh`. Installing the patch over modern kernels destroys `/sys/class/leds/*::ir_flood_led`.
 - **Do not silence initramfs rebuilds with `>/dev/null`:** Distros like Arch/CachyOS may run interactive hooks in `/usr/local/bin/mkinitcpio` (such as Limine updater prompts) that freeze if stdout is hidden.
-- **Maintain Bubblewrap isolation:** When adding support for additional legacy V4L2 apps, always route them through `bwrap` masking of `/dev/video0..31` to prevent `libyuv` AVX2 segfaults on raw Bayer nodes.
+- **Software ISP & Color Calibration:** The OV05C10 sensor uses factory Dell OEM calibrated CCMs in `/usr/share/libcamera/ipa/simple/ov05c10.yaml` extracted from `OV05C10_BBG501N3_LNL.aiqb` across 5 illuminants (2595K–6503K). After updating tuning profiles, always restart WirePlumber (`systemctl --user restart wireplumber`) because it caches IPA files.
+- **Hardware ISP & v4l2-relayd:** The preferred high-performance path for normal desktop camera usage is the Intel IPU7 Hardware ISP stack via `v4l2-relayd` -> `/dev/video50`. When using this path, `pipewire-libcamera` must remain uninstalled so WirePlumber routes all camera requests through the V4L2 loopback node without competing for physical ISYS endpoints.

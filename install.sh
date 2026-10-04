@@ -43,10 +43,10 @@ SEEN_KERNEL_ONLY=0 SEEN_HOWDY_ONLY=0
 # packaging error, not a user error, so preflight refuses to start.
 REQUIRED_MODULES=(hm1092 intel-cvs int3472-patched ipu-bridge-patched)
 # Board-specific extras. ov05c10 is the RGB sensor on SVP7500 boards that pair
-# the bridge with OVTI05C1 (Dell Pro Plus 14 PB14250) instead of OV08x40; it is
-# inert on boards that do not have that sensor, and its absence must never fail
-# the install for everyone else.
-OPTIONAL_MODULES=(ov05c10)
+# the bridge with OVTI05C1 (Dell Pro Plus 14 PB14250) instead of OV08x40.
+# intel-ipu7-psys is the hardware ISP processor driver that removes the silicon
+# sensor seam/grid line and enables hardware 3A/ISP processing.
+OPTIONAL_MODULES=(ov05c10 intel-ipu7-psys)
 
 usage(){
   # Print this file's own header block, so --help can never drift from the
@@ -1059,6 +1059,7 @@ fi
 run mkdir -p /etc/udev/rules.d
 install_rule 99-svp7500-no-autosuspend.rules
 install_rule 99-hm1092-ir-led.rules
+install_rule 99-intel-ipu7-hide-raw.rules
 run_quiet udevadm control --reload-rules || true
 run_quiet udevadm trigger --subsystem-match=leds --action=change || true
 LEDB=/sys/class/leds/HIMX1092_00::ir_flood_led/brightness
@@ -1594,6 +1595,27 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+say "libcamera Software ISP tuning (color calibration)"
+LIBCAMERA_IPA_DIR=/usr/share/libcamera/ipa/simple
+if [[ -d "$HERE/libcamera/ipa/simple" ]]; then
+  if [[ ! -d /usr/share/libcamera ]]; then
+    skip_step "libcamera is not installed — tuning files not written"
+  else
+    for y in "$HERE"/libcamera/ipa/simple/ov05c10.yaml*; do
+      [[ -f $y && $y != *.md ]] || continue
+      yn=$(basename "$y")
+      if [[ $DRY_RUN -eq 1 ]]; then
+        plan "would install: $LIBCAMERA_IPA_DIR/$yn"
+      elif install -Dm644 "$y" "$LIBCAMERA_IPA_DIR/$yn" 2>/dev/null; then
+        ok "$yn"
+      else
+        bad "failed to install $yn to $LIBCAMERA_IPA_DIR"
+      fi
+    done
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 say "V4L2 Loopback & Desktop Integration (On-demand QRCA, device isolation)"
 if command -v qrca >/dev/null 2>&1; then
   if [[ -f "$HERE/scripts/qrca" ]]; then
@@ -1619,8 +1641,44 @@ else
   skip_step "qrca is not installed — skipping QRCA on-demand wrapper integration"
 fi
 
-
 # ---------------------------------------------------------------------------
+say "Intel IPU7 Hardware ISP & v4l2-relayd"
+if [[ -d "$HERE/ipu7-hardware-isp" ]]; then
+  # 1. Tuning profiles and calibration
+  if [[ -d "$HERE/ipu7-hardware-isp/camera" ]]; then
+    run mkdir -p /etc/camera/ipu7x
+    if run cp -r "$HERE/ipu7-hardware-isp/camera/"* /etc/camera/ipu7x/ 2>/dev/null; then
+      ok "installed /etc/camera/ipu7x sensor tuning profiles and graphs"
+    else
+      bad "failed to install tuning profiles to /etc/camera/ipu7x"
+    fi
+  fi
+
+  # 2. Proprietary libraries & plugins
+  if [[ -d "$HERE/ipu7-hardware-isp/lib" ]]; then
+    run cp -P "$HERE/ipu7-hardware-isp/lib/"* /usr/lib/ 2>/dev/null || true
+    run mkdir -p /usr/lib/libcamhal/plugins
+    run cp -P "$HERE/ipu7-hardware-isp/plugins/"* /usr/lib/libcamhal/plugins/ 2>/dev/null || true
+    run mkdir -p /usr/lib/gstreamer-1.0
+    run cp -P "$HERE/ipu7-hardware-isp/gstreamer/"* /usr/lib/gstreamer-1.0/ 2>/dev/null || true
+    run ldconfig 2>/dev/null || true
+    ok "installed Intel Camera HAL, IA libraries, and GStreamer plugin"
+  fi
+
+  # 3. v4l2-relayd binary and systemd service
+  if [[ -f "$HERE/ipu7-hardware-isp/bin/v4l2-relayd" ]]; then
+    if run install -m 0755 "$HERE/ipu7-hardware-isp/bin/v4l2-relayd" /usr/bin/v4l2-relayd; then
+      ok "installed /usr/bin/v4l2-relayd"
+    fi
+  fi
+  if [[ -f "$HERE/ipu7-hardware-isp/systemd/v4l2-relayd.service" ]]; then
+    if run install -m 0644 "$HERE/ipu7-hardware-isp/systemd/v4l2-relayd.service" /etc/systemd/system/v4l2-relayd.service; then
+      run systemctl daemon-reload 2>/dev/null || true
+      run systemctl enable --now v4l2-relayd.service 2>/dev/null || true
+      ok "installed and enabled /etc/systemd/system/v4l2-relayd.service"
+    fi
+  fi
+fi
 if [[ $DO_HOWDY -eq 1 ]]; then
 say "Howdy IR integration"
 # Howdy's recorders directory moves between versions and packagings. Asserting

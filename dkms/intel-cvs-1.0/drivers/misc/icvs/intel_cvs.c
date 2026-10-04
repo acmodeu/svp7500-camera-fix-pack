@@ -160,26 +160,12 @@ EXPORT_SYMBOL_GPL(cvs_send_mipi_ir_config);
 
 int cvs_send_mipi_rgb_config(void)
 {
-	int ret;
-	u8 state = 0xff;
-
-	if (!cvs || !cvs->dev) {
-		pr_err("intel_cvs: cvs_send_mipi_rgb_config: not initialized\n");
-		return -ENODEV;
-	}
-	/* len=0 sentinel selects the RGB (port 0) verbatim payload in cvs_write_i2c */
-	ret = cvs_write_i2c(HOST_SET_MIPI_CONFIG, NULL, 0);
-
-	if (cvs_read_i2c(GET_DEVICE_STATE, (char *)&state, sizeof(state)) > 0)
-		dev_info(cvs->dev,
-			 "%s: post-0x830 GET_DEVICE_STATE = 0x%02x\n",
-			 __func__, state);
-	else
-		dev_warn(cvs->dev,
-			 "%s: post-0x830 GET_DEVICE_STATE read failed\n",
-			 __func__);
-
-	return ret;
+	/*
+	 * NO-OP: Dell OEM firmware for SVP7500 on Lunar Lake already configures
+	 * port 0 for OV05C10. Sending alien HOST_SET_MIPI_CONFIG (0x0830) corrupts
+	 * the bridge's internal D-PHY configuration.
+	 */
+	return 0;
 }
 EXPORT_SYMBOL_GPL(cvs_send_mipi_rgb_config);
 

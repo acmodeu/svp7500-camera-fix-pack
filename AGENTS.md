@@ -17,6 +17,9 @@ For a complete technical breakdown of the reverse-engineering work, architecture
    - Never redirect initramfs commands to `/dev/null` (`mkinitcpio -P`, `dracut`, etc.). Distros like CachyOS have interactive bootloader hooks (e.g. Limine) in `/usr/local/bin/mkinitcpio` that block on `read` if stdout/stderr are suppressed.
 4. **V4L2 Device Isolation:**
    - Never expose raw IPU7 ISYS endpoints (`/dev/video0..31`) to legacy V4L2 / Qt / WebRTC applications. Always route through `scripts/qrca` using Bubblewrap (`bwrap`) isolation and `/dev/video50` (`v4l2loopback`).
+5. **Software ISP & Color Calibration:**
+   - The OV05C10 sensor uses factory Dell OEM calibrated CCMs in `/usr/share/libcamera/ipa/simple/ov05c10.yaml` extracted from `OV05C10_BBG501N3_LNL.aiqb` across 5 illuminants (2595K–6503K).
+   - After updating tuning profiles, always restart WirePlumber (`systemctl --user restart wireplumber`) because it caches IPA files.
 
 ## Essential Commands
 - **Check Hardware Compatibility:** `./tools/check-hardware.sh`

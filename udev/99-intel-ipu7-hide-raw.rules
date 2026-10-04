@@ -1,0 +1,1 @@
+SUBSYSTEM=="video4linux", ATTR{name}=="Intel IPU7 *", GROUP="root", MODE="0600", TAG-="uaccess"

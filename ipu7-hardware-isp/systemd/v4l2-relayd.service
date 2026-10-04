@@ -1,0 +1,13 @@
+[Unit]
+Description=On-Demand Intel IPU7 Hardware ISP Camera Relay
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+Environment=GST_PLUGIN_SYSTEM_PATH=/usr/lib/gstreamer-1.0
+ExecStart=/usr/bin/v4l2-relayd -i "icamerasrc scene-mode=4 wdr-level=150 ! video/x-raw,format=NV12,width=1920,height=1080 ! videoconvert" -s "videotestsrc num-buffers=2 pattern=black ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! videoconvert" -o "appsrc name=appsrc caps=video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! videoconvert ! v4l2sink name=v4l2sink device=/dev/video50 sync=false"
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

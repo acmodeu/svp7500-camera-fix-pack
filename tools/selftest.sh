@@ -357,8 +357,8 @@ fi
 
 [[ -f $INSTALL ]] || { printf 'selftest: no install.sh at %s\n' "$INSTALL" >&2; exit 1; }
 
-mapfile -t SCRIPTS < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name '*.sh' -type f -print | sort)
-mapfile -t DOCS    < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name '*.md' -type f -print | sort)
+mapfile -t SCRIPTS < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name 'recovery-extracted' -prune -o -name '*.sh' -type f -print | sort)
+mapfile -t DOCS    < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name 'recovery-extracted' -prune -o -name '*.md' -type f -print | sort)
 
 # ===========================================================================
 section "install.sh can locate every DKMS module it installs"
@@ -794,14 +794,19 @@ for conf in "$ROOT"/dkms/*/dkms.conf; do
   if [[ ! -f $mk ]]; then
     [[ -f $d/Makefile ]] || fail "$(rel "$d"): no Makefile — dkms has nothing to run"
   else
-    for bm in "${built[@]}"; do
-      grep -qE "(^|[[:space:]])${bm//./\\.}\.o([[:space:]]|$)" "$mk" \
-        || fail "$(rel "$mk") does not build $bm.o, but dkms.conf expects $bm.ko" \
+    for idx in "${!built[@]}"; do
+      bm="${built[$idx]}"
+      bloc=$(sed -n "s/^BUILT_MODULE_LOCATION\[$idx\]=\"\{0,1\}\([^\"]*\)\"\{0,1\}.*/\1/p" "$conf")
+      submk="$mk"
+      [[ -n $bloc && -f "$d/$bloc/Makefile" ]] && submk="$d/$bloc/Makefile"
+      grep -qE "(^|[[:space:]])${bm//./\\.}\.o([[:space:]]|$)" "$submk" \
+        || fail "$(rel "$submk") does not build $bm.o, but dkms.conf expects $bm.ko" \
                 "dkms fails at its copy step; the user sees one line about one kernel"
-      objs=$(sed -n "s/^${bm//./\\.}-y[[:space:]]*:=[[:space:]]*//p" "$mk")
+      objs=$(sed -n "/^${bm//./\\.}\(-y\|-objs\)[[:space:]]*[+:=[[:space:]]*/{:a; /\\\\$/{N; s/\\\\\n//; ta}; p}" "$submk" \
+             | sed "s/^${bm//./\\.}\(-y\|-objs\)[[:space:]]*[+:=[[:space:]]*//")
       [[ -z $objs ]] && objs="$bm.o"
       for o in $objs; do
-        [[ -f "${mk%/Makefile}/${o%.o}.c" ]] || fail "$(rel "${mk%/Makefile}"): missing source ${o%.o}.c (needed for $bm)" \
+        [[ -f "${submk%/Makefile}/${o%.o}.c" ]] || fail "$(rel "${submk%/Makefile}"): missing source ${o%.o}.c (needed for $bm)" \
                                         "the module is listed but its code is not in the package"
       done
     done
@@ -1077,7 +1082,7 @@ if command -v python3 >/dev/null 2>&1; then
   while read -r py; do
     if err=$(python3 -m py_compile "$py" 2>&1); then pass "$(rel "$py"): compiles"
     else fail "$(rel "$py"): python syntax error" "$err"; fi
-  done < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name '*.py' -type f -print | sort)
+  done < <(find "$ROOT" -path "$ROOT/.git" -prune -o -name 'recovery-extracted' -prune -o -name '*.py' -type f -print | sort)
   find "$ROOT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null
 else
   warn "python3 not available — skipped the syntax check of the Howdy recorder"

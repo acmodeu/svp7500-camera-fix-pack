@@ -58,7 +58,7 @@ warn(){ printf '  %s!%s %s\n' "$C_WARN" "$C_OFF" "$*"; }
 # Only modules this pack ships. Anything else on the system is not ours to
 # remove -- a uninstaller that takes out a user's v4l2loopback or graphics
 # tablet driver because it happened to be in `dkms status` is a bug.
-OURS=(hm1092 intel-cvs ipu-bridge-patched ov05c10 int3472-patched)
+OURS=(hm1092 intel-cvs ipu-bridge-patched ov05c10 int3472-patched intel-ipu7-psys)
 
 step "DKMS modules"
 for m in "${OURS[@]}"; do
@@ -77,11 +77,29 @@ done
 
 step "udev rules and modprobe.d configs"
 for f in /etc/udev/rules.d/99-hm1092-ir-led.rules /etc/udev/rules.d/99-svp7500-no-autosuspend.rules \
+         /etc/udev/rules.d/99-intel-ipu7-hide-raw.rules \
+         /etc/udev/rules.d/72-intel-mipi-ipu7-camera.rules /etc/modules-load.d/ipu7-psys.conf \
          /etc/modprobe.d/99-ipu7-usbio-order.conf /etc/modprobe.d/v4l2loopback.conf; do
   if [[ -f $f ]]; then
     if [[ $GO -eq 1 ]]; then rm -f "$f"; did "$f"; else plan "$f"; fi
   else skip "$f"; fi
 done
+
+step "v4l2-relayd service, binaries, and camera tuning"
+for f in /etc/systemd/system/v4l2-relayd.service /usr/bin/v4l2-relayd; do
+  if [[ -f $f ]]; then
+    if [[ $GO -eq 1 ]]; then
+      if [[ $f == *.service ]]; then systemctl disable --now "$(basename "$f")" 2>/dev/null || true; fi
+      rm -f "$f"
+      did "$f"
+    else
+      plan "$f"
+    fi
+  else skip "$f"; fi
+done
+if [[ -d /etc/camera/ipu7x ]]; then
+  if [[ $GO -eq 1 ]]; then rm -rf /etc/camera/ipu7x; did "/etc/camera/ipu7x"; else plan "/etc/camera/ipu7x"; fi
+fi
 
 step "desktop integration and on-demand wrappers"
 for f in /usr/local/bin/qrca /usr/local/share/applications/org.kde.qrca.desktop \
@@ -98,6 +116,15 @@ step "wireplumber drop-ins"
 WPD=/usr/share/wireplumber/wireplumber.conf.d
 for c in 50-disable-v4l2-ipu7.conf 51-libcamera-pause-on-idle.conf 52-libcamera-longer-timeout.conf; do
   f=$WPD/$c
+  if [[ -f $f ]]; then
+    if [[ $GO -eq 1 ]]; then rm -f "$f"; did "$f"; else plan "$f"; fi
+  else skip "$f"; fi
+done
+
+step "libcamera tuning files"
+IPA_DIR=/usr/share/libcamera/ipa/simple
+for c in ov05c10.yaml ov05c10.yaml.orig ov05c10.yaml.manual; do
+  f=$IPA_DIR/$c
   if [[ -f $f ]]; then
     if [[ $GO -eq 1 ]]; then rm -f "$f"; did "$f"; else plan "$f"; fi
   else skip "$f"; fi

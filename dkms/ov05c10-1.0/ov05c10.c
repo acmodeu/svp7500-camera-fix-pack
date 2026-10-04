@@ -22,14 +22,6 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 
-/*
- * Exported by intel_cvs. Fires HOST_SET_MIPI_CONFIG (0x0830) with the verbatim
- * Windows-trace RGB payload, configuring the SVP7500 bridge for port-0 (RGB)
- * forwarding. Called from ov05c10_start_streaming() AFTER the sensor is placed
- * in streaming mode so the bridge sees active MIPI clock on port 0.
- */
-extern int __weak cvs_send_mipi_rgb_config(void);
-
 #define OV05C10_REG_CHIP_ID_H	CCI_REG16(0x00)	//P0:0x00[7:0],0x01[7:0]
 #define OV05C10_REG_CHIP_ID_L	CCI_REG16(0x02)	//P0:0x02[7:0],0x03[7:0]
 #define OV05C10_CHIP_ID		0x43055610
@@ -73,7 +65,6 @@ static const char *const ov05c10_test_pattern_menu[] = {
 	"Color Bar",
 };
 static const s64 ov05c10_link_freq_menu_items[] = {
-	900000000ULL,
 	480000000ULL,
 };
 
@@ -97,17 +88,22 @@ struct ov05c10_mode {
 };
 
 static const struct cci_reg_sequence ov05c10_soft_standby[] = {
-	{ REG_PAGE_FLAG, PAGE_0 },
-	{ CCI_REG8(0xa0), 0x00 },
-	{ REG_PAGE_FLAG, PAGE_1 },
+	{ CCI_REG8(0xfd), 0x00 },
+	{ CCI_REG8(0x20), 0x5b },
+	{ CCI_REG8(0xfd), 0x01 },
+	{ CCI_REG8(0x33), 0x02 },
+	{ CCI_REG8(0x01), 0x02 },
 	{ CCI_REG8(0x01), 0x02 },
 };
 
 static const struct cci_reg_sequence ov05c10_streaming[] = {
-	{ REG_PAGE_FLAG, PAGE_0 },
-	{ CCI_REG8(0xa0), 0x01 },
-	{ REG_PAGE_FLAG, PAGE_1 },
+	{ CCI_REG8(0xfd), 0x01 },
+	{ CCI_REG8(0x33), 0x03 },
 	{ CCI_REG8(0x01), 0x02 },
+	{ CCI_REG8(0x01), 0x02 },
+	{ CCI_REG8(0x01), 0x02 },
+	{ CCI_REG8(0xfd), 0x00 },
+	{ CCI_REG8(0x20), 0x1f },
 };
 
 static const struct cci_reg_sequence ov05c10_test_enable[] = {
@@ -123,155 +119,6 @@ static const struct cci_reg_sequence ov05c10_test_disable[] = {
 static const struct cci_reg_sequence ov05c10_trigger[] = {
 	{ REG_PAGE_FLAG, PAGE_1 },
 	{ CCI_REG8(0x01), 0x01 },
-};
-
-static const struct cci_reg_sequence mode_2888_1808_30fps[] = {
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x20), 0x00 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x20), 0x0b },
-	{ CCI_REG8(0xc1), 0x09 },
-	{ CCI_REG8(0x21), 0x06 },
-	{ CCI_REG8(0x14), 0x78 },
-	{ CCI_REG8(0xe7), 0x03 },
-	{ CCI_REG8(0xe7), 0x00 },
-	{ CCI_REG8(0x21), 0x00 },
-	//19.2MHz
-	{ CCI_REG8(0x14), 0x96 },
-	{ CCI_REG8(0x1b), 0xbb },
-
-	{ CCI_REG8(0xfd), 0x01 },
-	{ CCI_REG8(0x03), 0x00 },
-	{ CCI_REG8(0x04), 0x06 },
-	{ CCI_REG8(0x05), 0x06 }, // VTS,  for 30.5 fps - from 20251015 James
-	{ CCI_REG8(0x06), 0xf4 }, // VTS,  for 30.5 fps - from 20251015 James
-	{ CCI_REG8(0x07), 0x08 },
-	{ CCI_REG8(0x1b), 0x01 },
-	{ CCI_REG8(0x24), 0xff },
-	{ CCI_REG8(0x42), 0x5d },
-	{ CCI_REG8(0x43), 0x08 },
-	{ CCI_REG8(0x44), 0x81 },
-	{ CCI_REG8(0x46), 0x5f },
-	{ CCI_REG8(0x48), 0x18 },
-	{ CCI_REG8(0x49), 0x04 },
-	{ CCI_REG8(0x5c), 0x18 },
-	{ CCI_REG8(0x5e), 0x13 },
-	{ CCI_REG8(0x70), 0x15 },
-	{ CCI_REG8(0x77), 0x35 },
-	{ CCI_REG8(0x79), 0x00 },
-	{ CCI_REG8(0x7b), 0x08 },
-	{ CCI_REG8(0x7d), 0x08 },
-	{ CCI_REG8(0x7e), 0x08 },
-	{ CCI_REG8(0x7f), 0x08 },
-	{ CCI_REG8(0x90), 0x37 },
-	{ CCI_REG8(0x91), 0x05 },
-	{ CCI_REG8(0x92), 0x18 },
-	{ CCI_REG8(0x93), 0x27 },
-	{ CCI_REG8(0x94), 0x05 },
-	{ CCI_REG8(0x95), 0x38 },
-	{ CCI_REG8(0x9b), 0x00 },
-	{ CCI_REG8(0x9c), 0x06 },
-	{ CCI_REG8(0x9d), 0x28 },
-	{ CCI_REG8(0x9e), 0x06 },
-	{ CCI_REG8(0xb2), 0x0d }, // 0f;V1.13
-	{ CCI_REG8(0xb3), 0x29 },
-	{ CCI_REG8(0xbf), 0x3c },
-	{ CCI_REG8(0xc2), 0x04 },
-	{ CCI_REG8(0xc4), 0x00 },
-	{ CCI_REG8(0xca), 0x20 },
-	{ CCI_REG8(0xcb), 0x20 },
-	{ CCI_REG8(0xcc), 0x28 },
-	{ CCI_REG8(0xcd), 0x28 },
-	{ CCI_REG8(0xce), 0x20 },
-	{ CCI_REG8(0xcf), 0x20 },
-	{ CCI_REG8(0xd0), 0x2a },
-	{ CCI_REG8(0xd1), 0x2a },
-
-	{ CCI_REG8(0xfd), 0x0f },
-	{ CCI_REG8(0x00), 0x00 },
-	{ CCI_REG8(0x01), 0xa0 },
-	{ CCI_REG8(0x02), 0x48 },
-	{ CCI_REG8(0x07), 0x8e }, //V1.13
-	{ CCI_REG8(0x08), 0x70 },
-	{ CCI_REG8(0x09), 0x01 },
-	{ CCI_REG8(0x0b), 0x40 },
-	{ CCI_REG8(0x0d), 0x07 },
-	{ CCI_REG8(0x11), 0x33 },
-	{ CCI_REG8(0x12), 0x77 },
-	{ CCI_REG8(0x13), 0x66 },
-	{ CCI_REG8(0x14), 0x65 },
-	{ CCI_REG8(0x15), 0x37 },
-	{ CCI_REG8(0x16), 0xbf },
-	{ CCI_REG8(0x17), 0xff },
-	{ CCI_REG8(0x18), 0xff },
-	{ CCI_REG8(0x19), 0x12 },
-	{ CCI_REG8(0x1a), 0x10 },
-	{ CCI_REG8(0x1c), 0x77 },
-	{ CCI_REG8(0x1d), 0x77 },
-	{ CCI_REG8(0x20), 0x0f },
-	{ CCI_REG8(0x21), 0x0f },
-	{ CCI_REG8(0x22), 0x0f },
-	{ CCI_REG8(0x23), 0x0f },
-	{ CCI_REG8(0x2b), 0x20 },
-	{ CCI_REG8(0x2c), 0x20 },
-	{ CCI_REG8(0x2d), 0x04 },
-	{ CCI_REG8(0xfd), 0x03 },
-	{ CCI_REG8(0x9d), 0x0f },
-	{ CCI_REG8(0x9f), 0x40 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x20), 0x1b },
-	{ CCI_REG8(0xfd), 0x04 },
-	{ CCI_REG8(0x19), 0x60 },
-	{ CCI_REG8(0xfd), 0x02 },
-	{ CCI_REG8(0x75), 0x05 },
-	{ CCI_REG8(0x7f), 0x06 },
-	{ CCI_REG8(0x9a), 0x03 },
-	{ CCI_REG8(0xa1), 0x01 },  // GRBG github:75
-	{ CCI_REG8(0xa2), 0x07 },
-	{ CCI_REG8(0xa3), 0x10 },
-	{ CCI_REG8(0xa5), 0x02 },
-	{ CCI_REG8(0xa6), 0x0b }, // hsize[11:8]
-	{ CCI_REG8(0xa7), 0x48 }, // hsize[7:0]
-
-	{ CCI_REG8(0xfd), 0x07 },
-	{ CCI_REG8(0x42), 0x00 },
-	{ CCI_REG8(0x43), 0x80 },
-	{ CCI_REG8(0x44), 0x00 },
-	{ CCI_REG8(0x45), 0x80 },
-	{ CCI_REG8(0x46), 0x00 },
-	{ CCI_REG8(0x47), 0x80 },
-	{ CCI_REG8(0x48), 0x00 },
-	{ CCI_REG8(0x49), 0x80 },
-	{ CCI_REG8(0x00), 0xf7 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0xe7), 0x03 },
-	{ CCI_REG8(0xe7), 0x00 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x8e), 0x0b }, // hsize[11:8]
-	{ CCI_REG8(0x8f), 0x48 }, // hsize[7:0]
-	{ CCI_REG8(0x93), 0x18 },
-	{ CCI_REG8(0x94), 0xff },
-	{ CCI_REG8(0x95), 0xbd },
-	{ CCI_REG8(0x96), 0x1a },
-	{ CCI_REG8(0x98), 0x04 },
-	{ CCI_REG8(0x99), 0x08 },
-	{ CCI_REG8(0x9b), 0x10 },
-	{ CCI_REG8(0x9c), 0x3f },
-	{ CCI_REG8(0xa1), 0x05 },
-	{ CCI_REG8(0xa4), 0x2f },
-	{ CCI_REG8(0xc0), 0x0c },
-	{ CCI_REG8(0xc1), 0x08 },
-	{ CCI_REG8(0xc2), 0x00 },
-	{ CCI_REG8(0xb6), 0x20 },
-	{ CCI_REG8(0xbb), 0x80 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0xa0), 0x00 }, // disable MIPI
-	{ CCI_REG8(0xfd), 0x01 },
-	{ CCI_REG8(0x33), 0x03 },
-	{ CCI_REG8(0x01), 0x02 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x20), 0x1f },
-	{ CCI_REG8(0xfd), 0x01 },
 };
 
 //2800X1576_2lane_raw10_Mclk19.2M_pclk96M_30fps
@@ -418,30 +265,10 @@ static const struct cci_reg_sequence mode_2800_1576_30fps[] = {
 	{ CCI_REG8(0xb6), 0x20 },
 	{ CCI_REG8(0xbb), 0x80 },
 	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0xa0), 0x00 }, //disable MIPI
-	{ CCI_REG8(0xfd), 0x01 },
-	{ CCI_REG8(0x33), 0x03 },
-	{ CCI_REG8(0x01), 0x02 },
-	{ CCI_REG8(0xfd), 0x00 },
-	{ CCI_REG8(0x20), 0x1f },
-	{ CCI_REG8(0xfd), 0x01 },
+	{ CCI_REG8(0xa0), 0x01 },
 };
 
 static const struct ov05c10_mode supported_modes[] = {
-	{
-		.width = 2888,
-		.height = 1808,
-		.hts = 1608,
-		.vts_def = 3720,
-		.vts_min = 3720,
-		.code = MEDIA_BUS_FMT_SGRBG10_1X10,
-		.fps = 30,
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(mode_2888_1808_30fps),
-			.regs = mode_2888_1808_30fps,
-		},
-		.link_freq_index = 0,
-	},
 	{
 		.width = 2800,
 		.height = 1576,
@@ -454,7 +281,7 @@ static const struct ov05c10_mode supported_modes[] = {
 			.num_of_regs = ARRAY_SIZE(mode_2800_1576_30fps),
 			.regs = mode_2800_1576_30fps,
 		},
-		.link_freq_index = 1,
+		.link_freq_index = 0,
 	},
 };
 
@@ -691,11 +518,6 @@ static int ov05c10_start_streaming(struct ov05c10 *ov05c10)
 		goto err_rpm_put;
 	}
 
-	if (cvs_send_mipi_rgb_config) {
-		int cvs_ret = cvs_send_mipi_rgb_config();
-		dev_info(&client->dev, "intel_cvs port-0 RGB mipi config returned %d\n", cvs_ret);
-	}
-
 	return 0;
 
 err_rpm_put:
@@ -863,8 +685,8 @@ static int ov05c10_init_state(struct v4l2_subdev *sd,
 		.pad = 0,
 		.format = {
 			.code = MEDIA_BUS_FMT_SGRBG10_1X10,
-			.width = 2888,
-			.height = 1808,
+			.width = 2800,
+			.height = 1576,
 		},
 	};
 
