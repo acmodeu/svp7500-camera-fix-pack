@@ -15,41 +15,31 @@ to know that the payload is really 10-bit greyscale.
 
 | File | Applies to | Use it |
 |---|---|---|
-| `ir-recorder-video_capture.patch` | stock upstream Howdy | **yes** |
+| `ir-recorder-video_capture.patch` | Howdy 3.0.0 / `d3ab993` / git | **yes** (for Howdy 3.x) |
+| `ir-recorder-video_capture-2.6.patch` | Howdy 2.6.x (stable release tag) | **yes** (for Howdy 2.6.x) |
 | `ir-recorder-meson.patch` | stock upstream Howdy | when building from source |
-| `video_capture.patch` | a locally modified Howdy | no -- see below |
+| `video_capture.patch` | legacy local branch with pipewire | no -- kept for reference only |
+| `pam_auth.sh` | PAM helper script (Python 3) | **yes** (for modern Linux PAM) |
 
-`video_capture.patch` is inherited from upstream and does **not** apply to stock
-Howdy: alongside the `ir` branch it rewrites a `pipewire` recording plugin that
-upstream Howdy has never had, so the context never matches. It is kept for
-reference only.
+`install.sh` automatically tests and applies the correct patch for your installed Howdy version and auto-detects `device_path` using `tools/lib-detect.sh`.
 
-The two `ir-recorder-*` patches are minimal and verified to apply, with `-p1`
-from the Howdy source root, to both:
+## PAM Configuration (Sudo, Lock Screen, Login)
 
-- `howdy-git` 2.6.1.r273 (what Arch installs), and
-- Howdy 3.0.0 / `d3ab993` (what nixpkgs packages).
+Modern distributions (such as Arch / CachyOS) have removed Python 2, so the legacy `pam_python.so` is not available. This repository includes `pam_auth.sh`, a universal Python 3 PAM wrapper that works with `pam_exec.so`.
 
-Their `_create_reader` bodies are byte-identical, which is why one patch covers
-both.
+Add the following line to the top of the desired PAM service in `/etc/pam.d/`:
 
-`ir-recorder-meson.patch` is only needed when Howdy is built from source, which
-is the case on NixOS. Howdy's `meson.build` lists installed Python files
-explicitly, so a recorder that is merely copied into the source tree never
-reaches the install prefix. Distributions that drop the file straight into an
-already-installed tree (as the Arch role does) do not need it.
+```text
+auth       sufficient   pam_exec.so quiet /usr/lib/security/howdy/pam_auth.sh
+```
 
-## Installing
+### Recommended Services:
+- **Sudo (`/etc/pam.d/sudo`)**: enables face authentication in terminal commands.
+- **KDE Lock Screen (`/etc/pam.d/kde`)**: unlocks KDE Plasma upon wake/keypress in ~0.5s.
+- **Plasma Login / SDDM (`/etc/pam.d/plasmalogin` or `/etc/pam.d/sddm`)**: logs in upon booting the laptop.
 
-Source build (NixOS and similar):
-
-1. apply both `ir-recorder-*` patches
-2. copy `ir_reader.py` to `howdy/src/recorders/`
-3. point `media-ctl` at an absolute path -- the reader shells out to it to
-   enable the CSI-2 link, and PAM runs Howdy with a minimal environment
-
-Then set `recording_plugin = ir` in `config.ini`, along with
-`dark_threshold = 90` and `timeout = 6`.
+> [!TIP]
+> **KDE Wallet (KWallet) with Face Login**: When logging in via facial recognition instead of typing your user password, KWallet cannot automatically decrypt stored secrets (like saved Wi-Fi or Chrome passwords). To avoid a secondary KWallet prompt upon desktop load, either set your KWallet password to blank in **KWalletManager** (*Change Password -> leave blank*), or disable the KWallet subsystem in **System Settings -> KDE Wallet**.
 
 ## Note on the illuminator
 

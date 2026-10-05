@@ -1746,32 +1746,63 @@ else
     run cp "$HR/video_capture.py" "$HR/video_capture.py.bak-$(date +%Y%m%d-%H%M%S)" \
       || warn "could not back up video_capture.py — continuing without a backup"
     run chmod 644 "$HR/video_capture.py" || warn "could not make video_capture.py writable — the patch below will probably fail"
+    HOWDY_PATCH="$HERE/howdy/ir-recorder-video_capture.patch"
+    if ! patch -p1 --batch --forward --dry-run --silent "$HR/video_capture.py" < "$HOWDY_PATCH" >/dev/null 2>&1; then
+      if [[ -f "$HERE/howdy/ir-recorder-video_capture-2.6.patch" ]] && patch -p1 --batch --forward --dry-run --silent "$HR/video_capture.py" < "$HERE/howdy/ir-recorder-video_capture-2.6.patch" >/dev/null 2>&1; then
+        HOWDY_PATCH="$HERE/howdy/ir-recorder-video_capture-2.6.patch"
+      fi
+    fi
+
     if [[ $DRY_RUN -eq 1 ]]; then
-      if patch -p1 --batch --forward --dry-run --silent "$HR/video_capture.py" < "$HERE/howdy/ir-recorder-video_capture.patch" >/dev/null 2>&1; then
+      if patch -p1 --batch --forward --dry-run --silent "$HR/video_capture.py" < "$HOWDY_PATCH" >/dev/null 2>&1; then
         plan "would patch $HR/video_capture.py (patch --dry-run: applies cleanly)"
         HOWDY_OK=$((HOWDY_OK+1))
       else
-        bad "howdy/ir-recorder-video_capture.patch does NOT apply to $HR/video_capture.py (dry run) — a real run would leave the IR plugin unhooked"
+        bad "$(basename "$HOWDY_PATCH") does NOT apply to $HR/video_capture.py (dry run) — a real run would leave the IR plugin unhooked"
         HOWDY_FAIL=$((HOWDY_FAIL+1))
-        action "your Howdy version differs: apply $HERE/howdy/ir-recorder-video_capture.patch to $HR/video_capture.py by hand"
+        action "your Howdy version differs: apply $HOWDY_PATCH to $HR/video_capture.py by hand"
       fi
-    elif PERR=$(patch -p1 --batch --forward --reject-file=- --no-backup-if-mismatch --silent "$HR/video_capture.py" < "$HERE/howdy/ir-recorder-video_capture.patch" 2>&1); then
+    elif PERR=$(patch -p1 --batch --forward --reject-file=- --no-backup-if-mismatch --silent "$HR/video_capture.py" < "$HOWDY_PATCH" 2>&1); then
       # Confirm from the file, not from patch's exit code.
       if grep -q 'ir_reader' "$HR/video_capture.py"; then
-        HOWDY_OK=$((HOWDY_OK+1)); ok "patched video_capture.py"
+        HOWDY_OK=$((HOWDY_OK+1)); ok "patched video_capture.py ($(basename "$HOWDY_PATCH"))"
       else
         HOWDY_FAIL=$((HOWDY_FAIL+1)); bad "patch succeeded but video_capture.py has no ir_reader hook"
-        action "apply $HERE/howdy/ir-recorder-video_capture.patch to $HR/video_capture.py by hand"
+        action "apply $HOWDY_PATCH to $HR/video_capture.py by hand"
       fi
     else
       HOWDY_FAIL=$((HOWDY_FAIL+1))
-      bad "video_capture.py patch failed — your Howdy version differs; apply howdy/ir-recorder-video_capture.patch by hand"
+      bad "video_capture.py patch failed — your Howdy version differs; apply $HOWDY_PATCH by hand"
       printf '%s\n' "$PERR" | sed 's/^/          /'
-      action "apply $HERE/howdy/ir-recorder-video_capture.patch to $HR/video_capture.py by hand"
+      action "apply $HOWDY_PATCH to $HR/video_capture.py by hand"
     fi
     run chmod 444 "$HR/video_capture.py" || warn "could not restore video_capture.py to mode 0444"
   else
     HOWDY_OK=$((HOWDY_OK+1)); ok "video_capture.py already has the ir plugin"
+  fi
+
+  HOWDY_BASE=$(dirname "$HR")
+  # Install the Python 3 PAM authentication helper
+  if [[ -f "$HERE/howdy/pam_auth.sh" ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      plan "would install $HOWDY_BASE/pam_auth.sh"
+      HOWDY_OK=$((HOWDY_OK+1))
+    elif run install -m 0755 "$HERE/howdy/pam_auth.sh" "$HOWDY_BASE/pam_auth.sh"; then
+      HOWDY_OK=$((HOWDY_OK+1)); ok "installed $HOWDY_BASE/pam_auth.sh"
+    fi
+  fi
+
+  # Fix NumPy 2.x and allow 'ir' recorder in Howdy's test command if present
+  if [[ -f "$HOWDY_BASE/cli/test.py" ]] && ! grep -q '("opencv", "ir")' "$HOWDY_BASE/cli/test.py"; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      plan "would patch $HOWDY_BASE/cli/test.py for ir recorder & numpy compatibility"
+    else
+      run sed -i 's/config.get("video", "recording_plugin") != "opencv"/config.get("video", "recording_plugin") not in ("opencv", "ir")/' "$HOWDY_BASE/cli/test.py" 2>/dev/null || true
+      run sed -i 's/hist = cv2.calcHist(\[frame\], \[0\], None, \[8\], \[0, 256\])/hist = cv2.calcHist([frame], [0], None, [8], [0, 256]).flatten()/' "$HOWDY_BASE/cli/test.py" 2>/dev/null || true
+      run sed -i 's/hist_total = int(sum(hist)\[0\])/hist_total = int(sum(hist))/' "$HOWDY_BASE/cli/test.py" 2>/dev/null || true
+      run sed -i 's/value_perc = float(value\[0\]) \/ hist_total/value_perc = float(value) \/ (hist_total or 1)/' "$HOWDY_BASE/cli/test.py" 2>/dev/null || true
+      ok "patched $HOWDY_BASE/cli/test.py for ir recorder & numpy compatibility"
+    fi
   fi
 
   # Howdy's config lives in different places depending on version and
@@ -1815,8 +1846,22 @@ else
         action "edit $CFG by hand so it contains: ${cfgmiss[*]}"
       fi
     fi
-    warn "set device_path to your IR node: $HERE/tools/find-ir-node.sh"
-    action "set device_path in $CFG using $HERE/tools/find-ir-node.sh (node numbers shuffle between boots)"
+    if [[ -z ${LD_NODE:-} ]] && [[ -f "$HERE/tools/lib-detect.sh" ]]; then
+      # shellcheck source=/dev/null
+      . "$HERE/tools/lib-detect.sh"
+      ld_detect >/dev/null 2>&1 || true
+    fi
+    if [[ -n ${LD_NODE:-} ]]; then
+      if [[ $DRY_RUN -eq 1 ]]; then
+        plan "would set in $CFG: device_path = $LD_NODE"
+      else
+        sed -i "s|^device_path *=.*|device_path = $LD_NODE|" "$CFG" || true
+        ok "config: device_path = $LD_NODE"
+      fi
+    else
+      warn "set device_path to your IR node: $HERE/tools/find-ir-node.sh"
+      action "set device_path in $CFG using $HERE/tools/find-ir-node.sh (node numbers shuffle between boots)"
+    fi
     HOWDY_PHASE_DONE=1
   else
     HOWDY_FAIL=$((HOWDY_FAIL+1))
@@ -2158,11 +2203,18 @@ else
   # --howdy-only touches no kernel module, so do not send anyone for a reboot
   # they do not need.
   printf '    No reboot needed — nothing kernel-side was changed. Next:\n'
-  printf '      %s/tools/find-ir-node.sh   identify the IR /dev/videoN, then set\n' "$HERE"
-  printf '                                    device_path in your Howdy config.ini\n'
   if [[ $HOWDY_PHASE_DONE -eq 1 ]]; then
-    printf '      sudo howdy -U $USER add       enrol a face model\n'
-    printf '      sudo howdy test               watch the IR frames\n'
+    printf '      1. Enrol your face model:\n'
+    printf '         sudo howdy -U $USER add\n\n'
+    printf '      2. Test camera feed & face detection:\n'
+    printf '         sudo -E howdy test\n\n'
+    printf '      3. Enable PAM authentication (optional):\n'
+    printf '         - Sudo:            add to /etc/pam.d/sudo:\n'
+    printf '                            auth sufficient pam_exec.so quiet %s/pam_auth.sh\n' "${HOWDY_BASE:-/usr/lib/security/howdy}"
+    printf '         - KDE lock screen: add to /etc/pam.d/kde:\n'
+    printf '                            auth sufficient pam_exec.so quiet %s/pam_auth.sh\n' "${HOWDY_BASE:-/usr/lib/security/howdy}"
+    printf '         - Login screen:    add to /etc/pam.d/plasmalogin (or sddm):\n'
+    printf '                            auth sufficient pam_exec.so quiet %s/pam_auth.sh\n' "${HOWDY_BASE:-/usr/lib/security/howdy}"
   fi
 fi
 

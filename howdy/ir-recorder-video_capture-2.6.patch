@@ -1,0 +1,21 @@
+--- a/recorders/video_capture.py
++++ b/recorders/video_capture.py
+@@ -104,6 +104,18 @@
+ 				self.config.get("video", "device_format")
+ 			)
+ 
++		elif self.config.get("video", "recording_plugin") == "ir":
++			# Raw V4L2 reader for a monochrome sensor that the driver tags as
++			# Bayer -- e.g. the Himax HM1092 on Intel IPU7, tagged SGRBG10.
++			# Anything honouring that tag debayers mono data; this reads the node
++			# directly and treats the payload as what it physically is, 10-bit
++			# greyscale. It also drives the IR flood illuminator on platforms
++			# where the sensor driver cannot.
++			from recorders.ir_reader import ir_reader
++			self.internal = ir_reader(
++				self.config.get("video", "device_path")
++			)
++
+ 		elif self.config.get("video", "recording_plugin") == "pyv4l2":
+ 			# Set the capture source for pyv4l2
+ 			from recorders.pyv4l2_reader import pyv4l2_reader

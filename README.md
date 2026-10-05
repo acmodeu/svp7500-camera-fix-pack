@@ -65,7 +65,7 @@ refuse to run anyway.
 >
 > | reporter | machine | distro | reported |
 > |---|---|---|---|
-> | @acmodeu | Dell Pro 14 PB14250 (CSI-2 port 1) | Arch / CachyOS | install OK; surfaced the port-1 difference |
+> | @acmodeu | Dell Pro 14 PB14250 (CSI-2 port 1) | Arch / CachyOS | 100% verified: Hardware ISP, 0% CPU, IR streaming, Howdy face unlock (login & lock screen) |
 > | @Aohzan | Dell Pro 14 (`INTC10DE` bridge) | Arch | surfaced the differing bridge ACPI id |
 > | @dalandro | Dell Pro 14 Plus PB14250 | Ubuntu | RGB path, OV05C10 sensor |
 > | @tverhaeghe | Dell XPS 16 DA16260 | Fedora 44 Silverblue | RGB working ([vision-drivers#37](https://github.com/intel/vision-drivers/issues/37)) |
@@ -969,14 +969,10 @@ Gotchas that cost real debugging time:
 * The V4L2 control is **`link_frequency`, not `link_freq`** — the wrong name
   fails *silently* and yields convincing fake negatives. Always confirm the
   kernel's `config phy N ... mbps M` line actually changed.
-* `/dev/videoN`, `/dev/v4l-subdevN` and libcamera indexes **shuffle between
-  boots**. Resolve by entity name (`tools/find-ir-node.sh`), never hardcode.
-* Howdy's `dark_threshold` is **not brightness** — it is the percentage of
-  near-black pixels, and a frame is rejected when it *exceeds* the threshold.
-  IR frames here are ~70-77% black, so the stock `60` rejects everything. Use 90.
-* Howdy's recognition runs as the **unprivileged user** under a lock screen, so
-  the illuminator needs `udev/99-hm1092-ir-led.rules` or it silently never fires
-  and every frame is too dark to detect a face.
+* `/dev/videoN`, `/dev/v4l-subdevN` and libcamera indexes **shuffle between boots**. `install.sh` automatically resolves the correct node using `tools/lib-detect.sh` and configures `device_path`.
+* Howdy's `dark_threshold` is **not brightness** — it is the percentage of near-black pixels, and a frame is rejected when it *exceeds* the threshold. IR frames here are ~70-77% black, so the stock `60` rejects everything. `install.sh` automatically sets `dark_threshold = 90`.
+* Howdy's recognition runs as the **unprivileged user** under a lock screen, so the illuminator needs `udev/99-hm1092-ir-led.rules` or it silently never fires and every frame is too dark to detect a face.
+* **Modern Python 3 PAM Integration**: Legacy `pam_python.so` is not available on modern Linux distros (Python 2 was removed). This repository provides `howdy/pam_auth.sh` (working with `pam_exec.so`), enabling face unlock across Sudo, KDE Lock Screen (`/etc/pam.d/kde`), and Display Managers (`/etc/pam.d/plasmalogin` / `sddm`).
 
 ### Lunar Lake (LNL) RGB Support, Privacy LED Fix & On-Demand V4L2 Loopback
 

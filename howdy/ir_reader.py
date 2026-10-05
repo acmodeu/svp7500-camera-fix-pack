@@ -32,7 +32,11 @@ import numpy
 
 from recorders import v4l2
 from cv2 import cvtColor, COLOR_GRAY2BGR, CAP_PROP_FRAME_WIDTH, CAP_PROP_FRAME_HEIGHT
-from i18n import _
+try:
+	from i18n import _
+except ImportError:
+	def _(text):
+		return text
 
 # 'BA10' = V4L2_PIX_FMT_SGRBG10
 PIX_FMT_SGRBG10 = 0x30314142

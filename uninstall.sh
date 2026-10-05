@@ -130,6 +130,16 @@ for c in ov05c10.yaml ov05c10.yaml.orig ov05c10.yaml.manual; do
   else skip "$f"; fi
 done
 
+step "howdy recorder and pam helper"
+for d in /usr/lib/security/howdy /usr/lib/howdy /usr/local/lib/howdy; do
+  if [[ -f $d/recorders/ir_reader.py ]]; then
+    if [[ $GO -eq 1 ]]; then rm -f "$d/recorders/ir_reader.py"; did "$d/recorders/ir_reader.py"; else plan "$d/recorders/ir_reader.py"; fi
+  fi
+  if [[ -f $d/pam_auth.sh ]]; then
+    if [[ $GO -eq 1 ]]; then rm -f "$d/pam_auth.sh"; did "$d/pam_auth.sh"; else plan "$d/pam_auth.sh"; fi
+  fi
+done
+
 step "psys source patches"
 if [[ $KEEP_PSYS -eq 1 ]]; then
   warn "--keep-psys given: leaving ipu7-drivers patched"

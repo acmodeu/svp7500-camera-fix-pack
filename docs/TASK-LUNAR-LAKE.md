@@ -57,24 +57,33 @@ All of these issues were diagnosed, reverse-engineered, fixed, and verified.
                        | Intel IPU7 ISYS (Capture Subsystem)    |
                        |   /dev/media0, /dev/video0..31         |
                        +-------------------+--------------------+
-                                           | PipeWire SPA / libcamera
-                                           v
-                       +-------------------+--------------------+
-                       | libcamera (Software ISP debayering)    |
-                       | WirePlumber -> Desktop Camera Portal   |
-                       +-------------------+--------------------+
                                            |
-                   +-----------------------+-----------------------+
-                   |                                               |
-                   v                                               v
-        Wayland / WebRTC Apps                            On-Demand Loopback Wrapper
-      (Chromium, Firefox, Meet)                           (scripts/qrca via bwrap)
-                                                                   |
-                                                                   v
-                                                        /dev/video50 (v4l2loopback)
-                                                                   |
-                                                                   v
-                                                        KDE QRca & legacy V4L2 apps
+         +---------------------------------+---------------------------------+
+         | (Primary: Hardware ISP)                                           | (Fallback: Software ISP)
+         v                                                                   v
++------------------------------------+                             +------------------------------------+
+| Intel IPU7 PSYS Hardware ISP       |                             | libcamera (Software ISP debayering)|
+|   /dev/ipu7-psys0                  |                             |   simple pipeline handler          |
++-----------------+------------------+                             +-----------------+------------------+
+                  |                                                                  |
+                  v                                                                  v
++------------------------------------+                             +------------------------------------+
+| Intel CamHAL / icamerasrc plugin   |                             | WirePlumber / Desktop Portal       |
++-----------------+------------------+                             +-----------------+------------------+
+                  |                                                                  |
+                  v                                                                  v
++------------------------------------+                             +------------------------------------+
+| v4l2-relayd daemon (On-Demand)     |                             | scripts/qrca (bwrap isolation)     |
++-----------------+------------------+                             +-----------------+------------------+
+                  |                                                                  |
+                  +--------------------------------+---------------------------------+
+                                                   |
+                                                   v
+                                        /dev/video50 (v4l2loopback)
+                                                   |
+                                                   v
+                              All Applications (<1% CPU on HW ISP)
+                       (Chromium, Meet, Zoom, Telegram, QRca, Firefox)
 ```
 
 ---
@@ -83,10 +92,15 @@ All of these issues were diagnosed, reverse-engineered, fixed, and verified.
 
 ### 3.1. Hardware Privacy LED Latch & `SET_HOST_IDENTIFIER` Fix
 - **Symptom:** On Lunar Lake with Protocol 1.0 (`INTC10DE`), opening the camera turned the white privacy LED on. When closing the camera, the LED remained permanently stuck ON, even across system suspend (`s2idle`), because Lunar Lake keeps 5V USB VBUS power active to the internal hub during Modern Standby.
-- **Root Cause:** The SVP7500 firmware implements an autonomous hardware latch. In upstream `intel_cvs`, the `SET_HOST_IDENTIFIER` (0x0805) command was guarded inside `if (icvs->magic_num_support)`. Protocol 1.0 reports `magic_num_support = false`, so `SET_HOST_IDENTIFIER` was never dispatched, leaving the bridge firmware in autonomous LED mode.
+- **Root Cause & Windows Driver Analysis:** 
+  - The SVP7500 firmware implements autonomous hardware LED control tied to MIPI stream detection. In upstream `intel_cvs`, `SET_HOST_IDENTIFIER` (0x0805) was guarded inside `if (icvs->magic_num_support)`. Protocol 1.0 reports `magic_num_support = false`, leaving the bridge firmware in autonomous LED mode.
+  - Comprehensive reverse-engineering of official Dell Windows drivers (`ov05c10.sys`, `Vision.sys`, `iactrllogic64.sys`) and ACPI DSDT confirmed:
+    1. ACPI `INT3472` (`DSC0`) lacks pin `0x0D` (`INT3472_GPIO_TYPE_PRIVACY_LED`); it only exposes `0x12` (DVDD) and `0x02` (IR flood LED).
+    2. `Vision.sys` handler `0x1400045c0` for `CVSCameraInterface.NotifyPrivacy` is a stub that only emits a WPP trace log (`"Privacy On"` / `"Privacy Off"`) without any hardware writes or GPIO toggles.
+    3. The white LED is hardwired directly to the Synaptics SVP7500 internal autonomous logic. In Bridge Protocol 1.0, autonomous mode latches ON at stream start but fails to turn off on stream stop.
 - **Solution (`dkms/intel-cvs-1.0/drivers/misc/icvs/intel_cvs.c`):**
   - Moved `SET_HOST_IDENTIFIER` dispatch outside `magic_num_support` check so it executes unconditionally across all protocol versions.
-  - Set `payload.privacy_led_host = 1` (commands bridge firmware to surrender LED control to the host OS; since Linux IPU7 doesn't drive it, the LED stays cleanly off).
+  - Set `payload.privacy_led_host = 1` (commands bridge firmware to surrender LED control to the host OS; since Linux doesn't toggle it, the LED stays cleanly off).
   - Set `payload.rgbcamera_pwrup_host = 1` (MANDATORY: omitting this corrupts the SVP7500 MIPI PHY transmitter timing, causing packet length errors and timeouts).
   - Zero-initialized `union cv_host_identifiers` to prevent undefined stack garbage in reserved bits.
   - Desktop camera indicators (e.g. KDE Plasma / GNOME camera status icon) provide clean userland privacy awareness without hardware glare.
@@ -132,22 +146,13 @@ All of these issues were diagnosed, reverse-engineered, fixed, and verified.
 - **Finding:** On modern kernels (Linux 7.1+ / 7.2+), `tools/int3472-needed.sh` skips installing `int3472-patched`.
 - **Rationale:** The in-tree kernel driver `intel_skl_int3472_discrete` already includes native `skl_int3472_register_led` and exports `/sys/class/leds/*::ir_flood_led`. Overriding it with the out-of-tree patch would be a **harmful downgrade** that strips the flood LED node needed by Howdy.
 
-### 3.7. CPU Usage in Chromium / WebRTC
-- **Observation:** When streaming in Chrome, CPU usage is elevated.
-- **Technical Reason:** Under Linux on Lunar Lake (`INTC10DE` + `OV05C10`), libcamera operates using `SoftwareIsp` (`simple` pipeline handler). Every 30 fps Bayer frame is debayered and auto-exposed purely in software on CPU cores because Intel's hardware ISP graph (`/dev/ipu7-psys0`) is not yet upstreamed for Lunar Lake.
-- **Mitigation:** Hardware video encoding via VA-API (`--enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder`) and direct PipeWire portal capture (`chrome://flags/#enable-webrtc-pipewire-camera`).
+### 3.7. Initial Software ISP CPU Usage & Resolution via Hardware ISP
+- **Observation under Software ISP:** When streaming via `libcamera` SoftISP, CPU usage was elevated (~30–40%).
+- **Technical Reason:** Under Software ISP (`simple` pipeline handler), every 30 fps Bayer frame had to be debayered and auto-exposed purely in software on CPU cores.
+- **Initial SoftISP Mitigations:** Hardware video encoding via VA-API (`--enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder`) and direct PipeWire portal capture (`chrome://flags/#enable-webrtc-pipewire-camera`).
+- **Permanent Resolution:** Fully resolved by bringing up the Intel IPU7 PSYS Hardware ISP (Section 3.8 below), which offloads all image processing to hardware DSP and drops CPU usage to <1%.
 
----
-
-## 4. Repository File Map & Artifacts
-
-| Path | Purpose |
-| :--- | :--- |
-| `dkms/intel-cvs-1.0/drivers/misc/icvs/intel_cvs.c` | Bridge driver: `SET_HOST_IDENTIFIER`, Privacy LED latch fix, `cvs_send_mipi_rgb_config` |
-| `dkms/ov05c10-1.0/ov05c10.c` | Sensor driver: MIPI RGB bridge call, 4x analog gain calibration |
-| `dkms/hm1092-1.0/hm1092.c` | IR sensor driver: automatic port 0 RGB restore on stream stop |
-| `modprobe.d/v4l2loopback.conf` | Module parameters for loopback endpoint `/dev/video50` |
-### 3.6. Intel Hardware ISP Bring-up & Elimination of Sensor Artifacts (Option 2)
+### 3.8. Intel Hardware ISP Bring-up & Elimination of Sensor Artifacts (Option 2)
 - **Problem Statement:** The OmniVision OV05C10 sensor utilizes dual-bank column readout ADCs that produce physical silicon seams (a horizontal split across the center of the frame and subtle vertical column stripes). When debayering via open-source `libcamera` SoftISP, these silicon characteristics are exposed in browser video and video conferencing applications (e.g. Yandex Telemost, Google Meet, Zoom), accompanied by 30-40% continuous CPU debayering load.
 - **Root Cause:** Software ISP debayering lacks sensor-specific Fixed Pattern Noise Correction (FPNC) and dynamic hardware shading compensation tables. The official Dell OEM Ubuntu 24.04 recovery image (`DELL_PRO_14_PLUS_PB14250_Ubuntu2404_A00_Recovery_image.iso`) solves this by utilizing the Intel IPU7 PSYS hardware image signal processor.
 - **Solution & Architecture:**
