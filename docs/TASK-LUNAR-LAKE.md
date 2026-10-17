@@ -97,13 +97,12 @@ All of these issues were diagnosed, reverse-engineered, fixed, and verified.
   - Comprehensive reverse-engineering of official Dell Windows drivers (`ov05c10.sys`, `Vision.sys`, `iactrllogic64.sys`) and ACPI DSDT confirmed:
     1. ACPI `INT3472` (`DSC0`) lacks pin `0x0D` (`INT3472_GPIO_TYPE_PRIVACY_LED`); it only exposes `0x12` (DVDD) and `0x02` (IR flood LED).
     2. `Vision.sys` handler `0x1400045c0` for `CVSCameraInterface.NotifyPrivacy` is a stub that only emits a WPP trace log (`"Privacy On"` / `"Privacy Off"`) without any hardware writes or GPIO toggles.
-    3. The white LED is hardwired directly to the Synaptics SVP7500 internal autonomous logic. In Bridge Protocol 1.0, autonomous mode latches ON at stream start but fails to turn off on stream stop.
+    3. The white LED is hardwired directly to the Synaptics SVP7500 internal autonomous logic. In early prototypes with uncalibrated stream sequences, the LED appeared to latch ON due to incomplete stream teardowns.
 - **Solution (`dkms/intel-cvs-1.0/drivers/misc/icvs/intel_cvs.c`):**
   - Moved `SET_HOST_IDENTIFIER` dispatch outside `magic_num_support` check so it executes unconditionally across all protocol versions.
-  - Set `payload.privacy_led_host = 1` (commands bridge firmware to surrender LED control to the host OS; since Linux doesn't toggle it, the LED stays cleanly off).
+  - Set `payload.privacy_led_host = 0` (allows bridge firmware to drive the hardware privacy LED autonomously; with clean stream stop sequences, the LED turns ON during streaming and cleanly turns OFF when the stream stops).
   - Set `payload.rgbcamera_pwrup_host = 1` (MANDATORY: omitting this corrupts the SVP7500 MIPI PHY transmitter timing, causing packet length errors and timeouts).
   - Zero-initialized `union cv_host_identifiers` to prevent undefined stack garbage in reserved bits.
-  - Desktop camera indicators (e.g. KDE Plasma / GNOME camera status icon) provide clean userland privacy awareness without hardware glare.
 
 ### 3.2. RGB Stream Activation & IR Teardown Recovery
 - **Symptom:** The RGB camera either failed to receive frames or broke after using Howdy face unlock.

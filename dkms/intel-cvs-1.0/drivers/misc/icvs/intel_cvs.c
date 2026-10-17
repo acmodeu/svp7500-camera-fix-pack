@@ -387,10 +387,10 @@ static int cvs_common_probe(struct device *dev, bool is_i2c)
 			 * Wire-format of SET_HOST_IDENTIFIER is hardcoded inside
 			 * cvs_write_i2c() (intel_cvs_update.c) — the data/len args
 			 * are ignored for this opcode. That hardcoded payload sets
-			 * privacy_led_host=1 and rgbcamera_pwrup_host=1. This is
-			 * needed for SVP7xxx across all protocol versions (including
-			 * Protocol 1.0 on LNL) so the bridge relinquishes autonomous
-			 * privacy LED control to the host.
+			 * privacy_led_host=0 and rgbcamera_pwrup_host=1. This allows
+			 * the SVP7xxx firmware to drive the hardware privacy LED
+			 * autonomously (turning it ON while streaming and OFF when
+			 * streaming stops).
 			 */
 			ret = cvs_write_i2c(SET_HOST_IDENTIFIER, NULL, 0);
 			if (ret) {
