@@ -8,8 +8,7 @@ For a complete technical breakdown of the reverse-engineering work, architecture
 
 ## Key Rules & Guardrails
 1. **Bridge Protocol 1.0 & Privacy LED:**
-   - In `intel_cvs.c` / `intel_cvs_update.c`, `SET_HOST_IDENTIFIER` (0x0805) must remain dispatched unconditionally with `privacy_led_host = 0` and `rgbcamera_pwrup_host = 1`.
-   - `privacy_led_host = 0` allows the SVP7500 firmware to drive the hardware privacy LED autonomously (lighting it during active camera streams and extinguishing it upon stream stop).
+   - In `intel_cvs.c`, `SET_HOST_IDENTIFIER` (0x0805) must remain dispatched unconditionally with `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1`.
    - Never clear `rgbcamera_pwrup_host = 1` (it corrupts MIPI PHY clock timing).
 2. **INT3472 & Modern Kernels (>= 7.1):**
    - Do NOT install `int3472-patched` if `tools/int3472-needed.sh` returns exit code 1.

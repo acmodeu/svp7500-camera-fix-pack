@@ -90,11 +90,17 @@ int cvs_write_i2c(u16 cmd, u8 *data, u32 len)
 		host_identifiers.field.vision_sensing = 0;
 		host_identifiers.field.device_power_setting = 0;
 		/*
-		 * Set privacy_led_host = 0 so the SVP7500 firmware keeps autonomous
-		 * control of the privacy LED and lights it when streaming.
-		 * Note: rgbcamera_pwrup_host MUST remain 1 for MIPI PHY clock timing.
+		 * 2026-05-13: privacy_led_host was 0 here.  Miguel Vadillo's
+		 * upstream cvs_configure_dev_caps() sends THIS bit set (=1)
+		 * for Synaptics SVP7xxx (06CB:0701) per the quirks table
+		 * (ICVS_HOST_PRIV_CTRL -> ICVS_HOST_ID_PRIVACY_LED, BIT 30).
+		 * Hypothesis: missing this single bit is why our bridge
+		 * stays in "Vision-stack-only" mode for HM1092 and port 2
+		 * stays silent.  Without this the bridge thinks it owns
+		 * the privacy LED logic, which on this hardware appears
+		 * coupled to the IR sensor power/auth path.
 		 */
-		host_identifiers.field.privacy_led_host = 0;
+		host_identifiers.field.privacy_led_host = 1;
 		host_identifiers.field.rgbcamera_pwrup_host = 1;
 
 		memcpy(&out_buff[2], &host_identifiers.value,
@@ -108,7 +114,7 @@ int cvs_write_i2c(u16 cmd, u8 *data, u32 len)
 			return -EIO;
 		}
 		dev_info(cvs->dev,
-			 "%s:set_host_identifier sent host_id=0x%08x (privacy_led_host=0 for svp7xxx)\n",
+			 "%s:set_host_identifier sent host_id=0x%08x (privacy_led_host=1 for svp7xxx)\n",
 			 __func__, host_identifiers.value);
 		devm_kfree(ctx->dev, out_buff);
 		break;

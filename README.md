@@ -17,8 +17,8 @@
 >    - **Resolution & Link Frequency Lock**: Dropped the alien `mode_2888_1808` and locked sensor timings to the genuine Dell OEM specification: **`2800x1576 @ 30fps` at 480 MHz link frequency**, matching `/etc/camera/ipu7x/sensors/ov05c10-uf.json`.
 >    - **Neutralized Alien Bridge Opcode (0x0830)**: Eliminated `cvs_send_mipi_rgb_config()`, which was sending an alien OV08x40 packet from another laptop that corrupted the SVP7500 bridge D-PHY geometry.
 >
-> 3. **Hardware Privacy LED Support (Protocol 1.0 / Lunar Lake)**:
->    - Unconditionally dispatches `SET_HOST_IDENTIFIER` with `privacy_led_host = 0` and `rgbcamera_pwrup_host = 1` across all protocol versions. Enables autonomous hardware control of the white camera LED by the SVP7500 firmware: lights up when video streaming starts and cleanly turns off upon stream termination.
+> 3. **Hardware Privacy LED Latch Fix (Protocol 1.0 / Lunar Lake)**:
+>    - Unconditionally dispatches `SET_HOST_IDENTIFIER` with `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1` across all protocol versions. Prevents the white camera LED from latching permanently ON during modern standby (`s2idle`) or after camera sessions.
 >
 > 4. **Raw Device Node Isolation (`/dev/video0..31`)**:
 >    - Added `udev/99-intel-ipu7-hide-raw.rules` (`MODE="0600"` on `Intel IPU7 *`), preventing desktop applications (such as Telegram) from claiming raw ISYS nodes on startup and causing `Device or resource busy` for `v4l2-relayd`.
@@ -980,13 +980,15 @@ Recent Dell Lunar Lake laptops (such as the Dell Pro 14 PB14250, ACPI bridge ID 
 
 Several platform-specific challenges were reverse-engineered and resolved in this fork:
 
-#### 1. Hardware Privacy LED Control & `SET_HOST_IDENTIFIER`
-- **Background**: On Protocol 1.0 devices, upstream `intel_cvs` skipped `SET_HOST_IDENTIFIER` (0x0805) because it was guarded inside `if (icvs->magic_num_support)`. In early reverse-engineering prototypes with incomplete stream teardown sequences, the LED could latch ON because the MIPI PHY was never signaled to stop.
+#### 1. The Autonomous Privacy LED Latch & `SET_HOST_IDENTIFIER`
+- **Symptom**: On Protocol 1.0 devices, the white privacy LED turned on upon the first camera frame and remained stuck ON continuously—even after closing the camera app, and even across `s2idle` Modern Standby (because Lunar Lake motherboards keep 5V VBUS power active to the internal USB hub during sleep).
+- **Root cause**: The SVP7500 firmware implements an autonomous one-way hardware latch for the privacy LED. In upstream `intel_cvs`, the `SET_HOST_IDENTIFIER` (0x0805) command was guarded inside `if (icvs->magic_num_support)`. Because Protocol 1.0 devices report `magic_num_support = false`, `SET_HOST_IDENTIFIER` was never sent, leaving the bridge in autonomous control mode.
 - **The Fix**: 
   - `SET_HOST_IDENTIFIER` is now dispatched unconditionally during probe across all protocol versions.
-  - The payload sets `privacy_led_host = 0` and `rgbcamera_pwrup_host = 1`.
-  - Setting `privacy_led_host = 0` allows the SVP7500 firmware to retain autonomous control of the hardware privacy LED. With clean stream teardown sequences in modern kernels, the firmware reliably turns the white LED ON when a camera stream begins and extinguishes it when the stream stops.
+  - The payload explicitly sets `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1`.
+  - Setting `privacy_led_host = 1` commands the bridge firmware to relinquish autonomous LED control to the host OS. Since the Linux IPU7 driver does not drive the hardware LED, the latch is suppressed and the LED stays off permanently, preventing the persistent glare.
   - *Hardware requirement*: `rgbcamera_pwrup_host` MUST be kept set to `1`. Omitting or clearing this bit corrupts the SVP7500 MIPI PHY transmitter timing, leading to `Received packet is too long / short` errors and hardware stream timeouts in `intel_ipu7_isys`.
+  - System privacy awareness is cleanly handled by userland indicators (e.g. the KDE Plasma / GNOME camera status icon), which accurately show when `ov05c10` is actively streaming.
 
 #### 2. RGB Stream Activation & Low-Light Tuning (`ov05c10`)
 - **Bridge Port 0 Forwarding**: `intel_cvs` exports `cvs_send_mipi_rgb_config()`, called directly from `ov05c10_start_streaming()` once MIPI clock lanes are live.
