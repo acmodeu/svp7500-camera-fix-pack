@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > ### 🚀 Key Breakthroughs & Accomplishments in this Fork
 >
-> Based on reverse engineering of the camera subsystem from the official Dell OEM Ubuntu 24.04 recovery image (`DELL_PRO_14_PLUS_PB14250_Ubuntu2404_A00_Recovery_image.iso`), this fork provides **full Intel IPU7 Hardware ISP acceleration**, **0% idle CPU utilization**, **zero sensor artifacts**, and **universal Linux application compatibility** (Slack, Telegram, Chrome, Firefox, Cheese, QRCA):
+> Based on reverse engineering of the camera subsystem from the official Dell OEM Ubuntu 24.04 recovery image (`DELL_PRO_14_PLUS_PB14250_Ubuntu2404_A00_Recovery_image.iso`), this fork provides **full Intel IPU7 Hardware ISP acceleration**, **0% idle CPU utilization**, **zero sensor artifacts**, and **universal Linux application compatibility** (Slack, Telegram, Chrome, Firefox, Kamoso, QRCA):
 >
 > 1. **Intel IPU7 Hardware ISP (PSYS) & On-Demand Loopback Relay (`< 1%` CPU, Zero Artifacts)**:
 >    - Ported and patched the `intel-ipu7-psys` DKMS driver for modern Linux kernels (up to 7.2+).
@@ -24,7 +24,7 @@
 >    - Added `udev/99-intel-ipu7-hide-raw.rules` (`MODE="0600"` on `Intel IPU7 *`), preventing desktop applications (such as Telegram) from claiming raw ISYS nodes on startup and causing `Device or resource busy` for `v4l2-relayd`.
 >
 > 5. **Universal Application Compatibility**:
->    - Verified 100% stable, low-latency live video across all major Linux web browsers (Chrome, Firefox), Electron apps (Slack, Telegram), and native media players (Cheese, QRCA).
+>    - Verified 100% stable, low-latency live video across all major Linux web browsers (Chrome, Firefox), Electron apps (Slack, Telegram), and native media players (Kamoso, QRCA).
 >
 > 6. **Single-Command Full Stack Installer & Clean Uninstaller (`install.sh` / `uninstall.sh`)**:
 >    - Bundled all hardware ISP binaries, libraries, tuning profiles, udev rules, and DKMS drivers directly into `install.sh` and `uninstall.sh`. Running `sudo ./install.sh` configures the entire stack in one go, with full `--uninstall --go` support.
@@ -983,12 +983,18 @@ Several platform-specific challenges were reverse-engineered and resolved in thi
 #### 1. The Autonomous Privacy LED Latch & `SET_HOST_IDENTIFIER`
 - **Symptom**: On Protocol 1.0 devices, the white privacy LED turned on upon the first camera frame and remained stuck ON continuously—even after closing the camera app, and even across `s2idle` Modern Standby (because Lunar Lake motherboards keep 5V VBUS power active to the internal USB hub during sleep).
 - **Root cause**: The SVP7500 firmware implements an autonomous one-way hardware latch for the privacy LED. In upstream `intel_cvs`, the `SET_HOST_IDENTIFIER` (0x0805) command was guarded inside `if (icvs->magic_num_support)`. Because Protocol 1.0 devices report `magic_num_support = false`, `SET_HOST_IDENTIFIER` was never sent, leaving the bridge in autonomous control mode.
-- **The Fix**: 
-  - `SET_HOST_IDENTIFIER` is now dispatched unconditionally during probe across all protocol versions.
+- **The Production Fix (`privacy_led_host = 1`)**: 
+  - `SET_HOST_IDENTIFIER` is dispatched unconditionally during probe across all protocol versions.
   - The payload explicitly sets `privacy_led_host = 1` and `rgbcamera_pwrup_host = 1`.
-  - Setting `privacy_led_host = 1` commands the bridge firmware to relinquish autonomous LED control to the host OS. Since the Linux IPU7 driver does not drive the hardware LED, the latch is suppressed and the LED stays off permanently, preventing the persistent glare.
+  - Setting `privacy_led_host = 1` commands the bridge firmware to relinquish autonomous LED control to the host OS. Since Linux does not drive the hardware LED, the latch is suppressed and the LED stays off permanently, preventing the persistent glare.
   - *Hardware requirement*: `rgbcamera_pwrup_host` MUST be kept set to `1`. Omitting or clearing this bit corrupts the SVP7500 MIPI PHY transmitter timing, leading to `Received packet is too long / short` errors and hardware stream timeouts in `intel_ipu7_isys`.
   - System privacy awareness is cleanly handled by userland indicators (e.g. the KDE Plasma / GNOME camera status icon), which accurately show when `ov05c10` is actively streaming.
+
+- **Hardware Regression with Autonomous LED (`privacy_led_host = 0`)**:
+  - *The Experiment*: We tested allowing the SVP7500 bridge firmware to retain autonomous control of the LED (`privacy_led_host = 0`). While this succeeded in turning the white LED on during streaming and off on stream stop, it introduced a platform-level regression.
+  - *Embedded Controller (EC) & Keyboard Conflict*: On Dell Lunar Lake laptops, the SVP7500 CVS bridge is physically connected via sideband signaling and I2C to the platform Embedded Controller (EC) for Human Presence Detection (HPD) and Modern Standby (`s2idle`) power management. In autonomous mode, the bridge firmware asserts sideband status lines that cause the EC's keyboard controller emulation to enter a locked state (`i8042: Warning: Keylock active`).
+  - *Keyboard Failure upon Resume*: The appearance of `Keylock active` in the EC caused the built-in keyboard to disconnect and stop responding upon waking up from sleep mode (IRQ 1 halted, causing `Failed to open /dev/input/event3: No such device`).
+  - *Conclusion*: Reverting to `privacy_led_host = 1` immediately restores complete EC and keyboard stability across suspend/resume cycles. Therefore, `privacy_led_host = 1` remains the mandatory, production setting in `master`. The autonomous LED code is archived on the branch `feature-autonomous-privacy-led` for reference only.
 
 #### 2. RGB Stream Activation & Low-Light Tuning (`ov05c10`)
 - **Bridge Port 0 Forwarding**: `intel_cvs` exports `cvs_send_mipi_rgb_config()`, called directly from `ov05c10_start_streaming()` once MIPI clock lanes are live.
