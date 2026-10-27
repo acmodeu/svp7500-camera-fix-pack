@@ -1,1 +1,2 @@
 SUBSYSTEM=="video4linux", ATTR{name}=="Intel IPU7 *", GROUP="root", MODE="0600", TAG-="uaccess"
+SUBSYSTEM=="media", DEVPATH=="/devices/pci0000:00/0000:00:05.0/*", GROUP="root", MODE="0600", TAG-="uaccess"

@@ -1,4 +1,4 @@
 # Disable USB autosuspend for Synaptics SVP7500 CVS bridge
 # Bridge firmware appears to wedge on USB power state transitions; keep it always-on.
 # After observed wedges during idle uptime on 2026-05-12.
-SUBSYSTEM=="usb", ATTRS{idVendor}=="06cb", ATTRS{idProduct}=="0701", ATTR{power/control}="on", ATTR{power/autosuspend_delay_ms}="-1"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="06cb", ATTRS{idProduct}=="0701", ATTR{power/control}="on", ATTR{power/autosuspend_delay_ms}="-1"
