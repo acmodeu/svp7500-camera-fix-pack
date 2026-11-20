@@ -136,6 +136,9 @@ struct ipu7_psys {
 
 	struct ipu7_psys_config *subsys_config;
 	dma_addr_t subsys_config_dma_addr;
+
+	/* Serialize FW message buffer or task queue acquisition against TLB invalidation */
+	struct mutex acquire_fw_task_buffer_lock;
 };
 
 struct ipu7_psys_fh {

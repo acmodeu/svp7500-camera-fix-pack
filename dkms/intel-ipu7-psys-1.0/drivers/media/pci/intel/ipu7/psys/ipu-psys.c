@@ -1038,9 +1038,9 @@ static long ipu_psys_task_request(struct ipu_psys_task_request *task,
 		return -EINVAL;
 	}
 
-	mutex_lock(&psys->adev->acquire_fw_task_buffer_lock);
+	mutex_lock(&psys->acquire_fw_task_buffer_lock);
 	tq = ipu7_psys_get_task_queue(fh->ip, task);
-	mutex_unlock(&psys->adev->acquire_fw_task_buffer_lock);
+	mutex_unlock(&psys->acquire_fw_task_buffer_lock);
 	if (!tq) {
 		dev_err(&psys->dev, "Failed to get task queue\n");
 		return -EINVAL;
@@ -1103,19 +1103,7 @@ static long ipu7_psys_ioctl(struct file *file, unsigned int cmd,
 		     cmd != IPU_IOC_GRAPH_CLOSE);
 
 	/*
-	 * Defensive: synchronously resume the device before any ioctl reaches
-	 * the FW path. Without this, userspace can hit ipu7_fw_psys_graph_open
-	 * (and friends) immediately after system resume, while syscom queue
-	 * memory is still being torn down / re-mapped during firmware reload.
-	 * Result: get_token returns a stale-looking pointer, the next memset
-	 * faults on an unmapped page, and we oops with IRQs off then reboot.
-	 *
-	 * pm_runtime_resume_and_get drives psys_runtime_pm_resume to completion
-	 * (HW init, FW boot, fw_psys_open, ready=1). If resume fails, propagate
-	 * the error rather than dereferencing stale state.
-	 *
-	 * Belt and braces: also verify psys->ready is set after resume - a
-	 * cleanly-failed resume can leave the device powered but FW not ready.
+	 * Synchronously resume the device if not yet ready.
 	 */
 	err = pm_runtime_resume_and_get(pmdev);
 	if (err < 0) {
@@ -1129,11 +1117,18 @@ static long ipu7_psys_ioctl(struct file *file, unsigned int cmd,
 	ready_state = psys->ready;
 	spin_unlock_irqrestore(&psys->ready_lock, ready_flags);
 	if (!ready_state) {
-		dev_warn_ratelimited(&psys->dev,
-				     "ioctl: psys not ready after resume, refusing cmd 0x%x\n",
-				     cmd);
-		pm_runtime_put(pmdev);
-		return -ESHUTDOWN;
+		/* Force resume callback directly if runtime PM did not invoke it */
+		err = psys_runtime_pm_resume(pmdev);
+		if (err) {
+			dev_warn_ratelimited(&psys->dev,
+					     "ioctl: psys direct resume failed (%ld), refusing cmd 0x%x\n",
+					     err, cmd);
+			dev_warn_ratelimited(&psys->dev,
+					     "ioctl: psys not ready after resume, refusing cmd 0x%x\n",
+					     cmd);
+			pm_runtime_put(pmdev);
+			return err;
+		}
 	}
 
 	if (copy) {
@@ -1487,6 +1482,7 @@ static int ipu7_psys_probe(struct auxiliary_device *auxdev,
 	psys->timeout = IPU_PSYS_CMD_TIMEOUT_MS;
 
 	mutex_init(&psys->mutex);
+	mutex_init(&psys->acquire_fw_task_buffer_lock);
 	INIT_LIST_HEAD(&psys->fhs);
 
 	ret = ipu7_fw_psys_init(psys);
@@ -1507,8 +1503,6 @@ static int ipu7_psys_probe(struct auxiliary_device *auxdev,
 	}
 
 	dev_set_drvdata(dev, psys);
-	adev->get_running_fw_task_count =
-		ipu7_psys_get_running_fw_task_count;
 	mutex_unlock(&ipu7_psys_mutex);
 #ifdef CONFIG_DEBUG_FS
 	psys_fw_log_init(psys);
@@ -1524,6 +1518,7 @@ static int ipu7_psys_probe(struct auxiliary_device *auxdev,
 out_fw_release:
 	ipu7_fw_psys_release(psys);
 out_mutex_destroy:
+	mutex_destroy(&psys->acquire_fw_task_buffer_lock);
 	mutex_destroy(&psys->mutex);
 	cdev_del(&psys->cdev);
 out_unlock:
@@ -1544,7 +1539,6 @@ static void ipu7_psys_remove(struct auxiliary_device *auxdev)
 	struct ipu7_psys *psys = dev_get_drvdata(&auxdev->dev);
 	struct device *dev = &auxdev->dev;
 
-	psys->adev->get_running_fw_task_count = NULL;
 #ifdef CONFIG_DEBUG_FS
 	if (psys->debugfsdir)
 		debugfs_remove_recursive(psys->debugfsdir);
@@ -1557,6 +1551,7 @@ static void ipu7_psys_remove(struct auxiliary_device *auxdev)
 	cdev_del(&psys->cdev);
 	mutex_unlock(&ipu7_psys_mutex);
 
+	mutex_destroy(&psys->acquire_fw_task_buffer_lock);
 	mutex_destroy(&psys->mutex);
 
 	unregister_chrdev_region(ipu7_psys_dev_t, IPU_PSYS_NUM_DEVICES);
